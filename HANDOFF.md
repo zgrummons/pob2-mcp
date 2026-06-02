@@ -3,6 +3,17 @@
 Port of the PoE1 `pob-mcp` server to **Path of Exile 2**. This doc captures the current
 state so work can resume cleanly. Last updated: 2026-06-01.
 
+## Committed revisions (local only — nothing pushed)
+
+| Repo | Branch | Commit | Contents |
+|---|---|---|---|
+| `pob2-mcp/` | `main` | `2190b85` | The TypeScript MCP server (this project). No git remote yet. |
+| `PathOfBuilding-PoE2/` | `api-stdio-poe2` (off `dev`) | `ab38fe8` | The Lua bridge port: `src/API/*`, `src/utf8.lua`, `HeadlessWrapper.lua` hooks. |
+
+`PathOfBuilding-PoE2`'s `origin` is the community upstream (no push rights); `dev` is left pristine
+for pulling upstream. To back up the bridge, push `api-stdio-poe2` to a personal fork. SHAs are the
+state described below; later work will move past them.
+
 ## TL;DR
 
 - The hard foundation is **done and verified working**: a headless `luajit` PoB2 process exposing a
