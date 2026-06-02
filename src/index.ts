@@ -101,9 +101,14 @@ class PoBMCPServer {
     this.exportService = new BuildExportService(this.pobDirectory);
     this.skillGemService = new SkillGemService();
 
-    // Initialize poe.ninja client (always available)
+    // Initialize poe.ninja client. NOTE: endpoints/leagues are PoE1 — not
+    // validated for PoE2. Tools are gated behind POE_NINJA_ENABLED (default off).
     this.ninjaClient = new PoeNinjaClient();
-    console.error('[poe.ninja API] Client initialized');
+    if (process.env.POE_NINJA_ENABLED === 'true') {
+      console.error('[poe.ninja API] Tools enabled (PoE1 endpoints — unverified for PoE2)');
+    } else {
+      console.error('[poe.ninja API] Tools disabled (PoE1 endpoints; set POE_NINJA_ENABLED=true to expose)');
+    }
 
     // Initialize Trade API client (if enabled)
     const tradeEnabled = process.env.POE_TRADE_ENABLED === 'true';
@@ -294,8 +299,12 @@ class PoBMCPServer {
         tools.push(...getTradeToolSchemas());
       }
 
-      // Add poe.ninja API tools (always available)
-      tools.push(...getPoeNinjaToolSchemas());
+      // poe.ninja tools: PoE1 endpoints/leagues — NOT validated for PoE2.
+      // Gated off by default to avoid surfacing misleading PoE1 market data.
+      // Set POE_NINJA_ENABLED=true to expose them anyway.
+      if (process.env.POE_NINJA_ENABLED === 'true') {
+        tools.push(...getPoeNinjaToolSchemas());
+      }
 
       return { tools };
     });

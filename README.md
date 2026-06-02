@@ -140,10 +140,11 @@ npm run build
 |---|---|---|
 | `POB_DIRECTORY` | OS-default Builds dir | Path to your PoB builds directory |
 | `POB_LUA_ENABLED` | `false` | Set `"true"` to enable Lua bridge |
-| `POB_FORK_PATH` | `~/Projects/PathOfBuilding/src` | Path to PathOfBuilding/src |
+| `POB_FORK_PATH` | `~/Projects/PathOfBuilding-PoE2/src` | Path to PathOfBuilding-PoE2/src |
 | `POB_CMD` | `luajit` | LuaJIT binary path |
 | `POB_TIMEOUT_MS` | `10000` | Lua request timeout (ms) |
-| `POE_TRADE_ENABLED` | `false` | Enable Trade API tools |
+| `POE_TRADE_ENABLED` | `false` | Enable Trade API tools (⚠️ PoE1 endpoints — unverified for PoE2) |
+| `POE_NINJA_ENABLED` | `false` | Expose poe.ninja tools (⚠️ PoE1 endpoints/leagues — unverified for PoE2; off by default) |
 
 ### Setting Up the Lua Bridge
 

@@ -88,9 +88,8 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 `POB_LUA_ENABLED=true`, `POB_FORK_PATH=…/PathOfBuilding-PoE2/src`, `POB_CMD=luajit`,
 `POB_DIRECTORY=<your PoB2 Builds>`, `POB_TIMEOUT_MS=30000`.
 
-> Disposable verification scripts used during this work (`smoke-bridge.mjs`,
-> `verify-build-pipeline.mjs`, `verify-list-gems.mjs`) were removed after passing. Re-create from the
-> patterns above if needed; consider promoting one into `tests/` as a real integration test.
+> A committed integration test now covers the verified behavior:
+> `npx jest tests/integration/poe2Bridge.test.ts` (auto-skips if the PoE2 fork isn't present).
 
 ## Status
 
@@ -108,9 +107,19 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   - `analyze_skills` tool — shows each socket group's active skill + supports, flags tag-mismatched
     supports (e.g. an Attack support on a Cold spell), empty/disabled/unknown gems.
   - `suggest_supports` tool — ranks compatible, unused supports from the engine gem DB by tag
-    relevance. Service: `services/poe2SkillService.ts`; handlers: `handlers/poe2SkillHandlers.ts`.
-    Compatibility is a tag-gating heuristic (delivery tags gate; descriptive tags rank).
-    Verified end-to-end (Ice Nova: flags Runic Infusion mismatch; suggests Cold Exposure/Frost Nexus/…).
+    relevance, OR (with `measure_dps=true`) by **real measured DPS gain**: each candidate is
+    transiently socketed, the build recalculated, the delta recorded, then removed (main group
+    restored). Service: `services/poe2SkillService.ts`; handlers: `handlers/poe2SkillHandlers.ts`.
+    Verified: Ice Nova flags Runic Infusion mismatch; measured ranking gives Cold Penetration +60% >
+    Concentrated Area +30% > Cold Mastery +13%.
+- **`get_classes`** tool — PoE2 classes + ascendancy IDs straight from the engine tree
+  (Witch=1, Ranger=2, Warrior=6, Sorceress=7, Huntress=8, Mercenary=9, Monk=10, Druid=11).
+  README class-ID table corrected from PoE1.
+- **Integration tests** — `tests/integration/poe2Bridge.test.ts`, gated on the PoE2 fork being
+  present (skips in CI otherwise). 6 tests pass (ping, Spirit stats, level recalc, list_gems,
+  get_classes, analyze/suggest).
+- **Market tools gated** — `poe.ninja` tools now hidden unless `POE_NINJA_ENABLED=true`; Trade behind
+  `POE_TRADE_ENABLED`. Both labelled PoE1-endpoints / unverified-for-PoE2 in the README.
 
 ### Carried over from PoE1 — needs PoE2 review
 - **Legacy skill-gem tools** (`skillGemService.ts`, ~936 lines + `skillGemHandlers.ts`): hand-coded
@@ -118,20 +127,19 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   `analyze_skills` / `suggest_supports` above** — prefer those. Still-PoE1 and not yet ported:
   `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path`
   (and the old `analyze_skill_links` / `suggest_support_gems`, which remain registered).
-- Defensive analyzer thresholds; class/ascendancy ID tables in some tool descriptions.
-- `poe.ninja` + Trade API (PoE1 leagues/URLs); not validated for PoE2.
+- Defensive analyzer thresholds.
+- `poe.ninja` + Trade API — PoE1 leagues/URLs; **gated off by default**, not ported to PoE2 endpoints.
 - `clusterJewelHandlers` (non-MVP) — PoE1 cluster jewel model + needs the `PathOfBuilding2` fix.
 
 ## Recommended next steps (in order)
 
-1. **Deepen support suggestions with real DPS** — current `suggest_supports` ranks by tag heuristic;
-   optionally socket each candidate, recalc, report stat delta, then remove (engine-truth value).
-   Also port the remaining legacy gem tools (`validate_gem_quality`, `find_optimal_links`, etc.) or
-   retire them in favour of the engine-backed pair.
-2. Add a real integration test under `pob2-mcp/tests/` (promote a verify script) covering the bridge,
-   the `<PathOfBuilding2>` parse, `list_gems`, and `analyze_skills`/`suggest_supports`.
-3. Audit `poe.ninja`/Trade for PoE2 (new endpoints/leagues) or gate them off until ported.
-4. Validate class/ascendancy ID tables in tool docs against PoE2 (`PassiveSpec`/tree class map).
+1. Port or retire the remaining legacy gem tools (`validate_gem_quality`, `compare_gem_setups`,
+   `find_optimal_links`, `gem_upgrade_path`) — fold useful ones onto the engine-backed pair.
+2. Defensive analyzer (`defensiveAnalyzer.ts`) — review thresholds/keystone names for PoE2.
+3. If PoE2 market data is wanted: implement PoE2 `poe.ninja`/`trade2` endpoints behind the existing
+   flags (needs network; verify against live PoE2 economy/trade).
+4. `analyze_build` / `validate_build` deeper pass on real imported PoE2 build codes (charms, weapon
+   swap, Spirit reservation) beyond the current stat-level validation.
 
 ## Memory
 
