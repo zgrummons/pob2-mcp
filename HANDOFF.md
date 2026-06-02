@@ -121,31 +121,37 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 - **Integration tests** — `tests/integration/poe2Bridge.test.ts`, gated on the PoE2 fork being
   present (skips in CI otherwise). 6 tests pass (ping, Spirit stats, level recalc, list_gems,
   get_classes, analyze/suggest).
-- **Market tools gated** — `poe.ninja` tools now hidden unless `POE_NINJA_ENABLED=true`; Trade behind
-  `POE_TRADE_ENABLED`. Both labelled PoE1-endpoints / unverified-for-PoE2 in the README.
 - **Defensive analyzer retuned for PoE2** (`defensiveAnalyzer.ts` + `validateDefensiveLayers`):
   avoidance now uses `EvadeChance` / block / spell block / `DeflectChance` (no spell suppression or
   passive dodge); PoE1 aura/keystone advice (Grace/Determination/Acrobatics/Vitality/Wicked Ward) removed.
 - **Legacy PoE1 gem tools deregistered** — `analyze_skill_links`, `suggest_support_gems`,
   `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path` are no longer
   exposed unless `POB_LEGACY_GEM_TOOLS=true`. The engine-backed tools supersede them.
-- **Full unit + integration suite green** (251 tests).
+- **poe.ninja ported to PoE2** — `/poe2/api/economy/currencyexchange`; transforms the PoE2
+  `{lines,items}` shape into the existing `CurrencyOverview`. On by default (`POE_NINJA_DISABLED=true`
+  to hide). `find_arbitrage` is documented as inert on the spread-less PoE2 feed. Unit-tested.
+- **Trade API ported to PoE2 `trade2`** — base `…/api/trade2` (so StatMapper auto-loads PoE2 trade
+  stats); optional `POE_SESSION_ID` (POESESSID) + `POE_TRADE_BASE`/`POE_TRADE_USER_AGENT`. Still behind
+  `POE_TRADE_ENABLED`; Cloudflare/session-gated and **not live-verifiable from here** (best-effort).
+- **PoE2 build parsing** — `parseFlasks` reads Charm slots (ailment immunity from Thawing/Staunching/…),
+  no longer assumes 5 flask slots; build issues flag **Spirit** over-reservation.
+- **Full unit + integration suite green** (257 tests).
 
 ### Carried over from PoE1 — needs PoE2 review
-- `poe.ninja` + Trade API — PoE1 leagues/URLs; **gated off by default**, not ported to PoE2 endpoints.
+- Trade API — ported to `trade2` endpoints but **unverified live** (Cloudflare/POESESSID/rate limits);
+  needs a real session to confirm. poe.ninja `find_arbitrage` inert (no spread in PoE2 feed).
 - Legacy skill-gem tools (`skillGemService.ts`) — still PoE1 internally; **deregistered by default**.
   Reimplement on engine data or delete the dead code if never re-enabling.
 - `clusterJewelHandlers` (non-MVP) — PoE1 cluster jewel model + needs the `PathOfBuilding2` fix.
-- `analyze_build` / `validate_build` — deeper pass on real imported PoE2 build codes (charms, weapon
-  swap, Spirit reservation) beyond stat-level validation.
+- `analyze_build` / `validate_build` — weapon-swap sets and deeper import-code coverage still untested
+  against real PoE2 build codes.
 
 ## Recommended next steps (in order)
 
-1. `analyze_build` / `validate_build` deeper pass on real imported PoE2 build codes (charms, weapon
-   swap, Spirit reservation) beyond the current stat-level validation — get a real PoE2 build code to
-   exercise the full XML path.
-2. If PoE2 market data is wanted: implement PoE2 `poe.ninja`/`trade2` endpoints behind the existing
-   flags (needs network; verify against live PoE2 economy/trade).
+1. Live-verify the Trade API against a real PoE2 session (`POE_SESSION_ID`); confirm the `trade2`
+   search/fetch paths and adjust if GGG uses a realm segment.
+2. Exercise `analyze_build` / `validate_build` on real imported PoE2 build codes (weapon-swap sets,
+   charms, Spirit reservation) end to end.
 3. Delete the dead `skillGemService.ts` / `skillGemHandlers.ts` (and PoE1 schemas) if the legacy gem
    tools will never be re-enabled — currently deregistered but still compiled.
 4. Validate the PoE2 life/defensive thresholds against real endgame builds (current numbers are
