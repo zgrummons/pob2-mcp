@@ -104,7 +104,8 @@ describe('ValidationService', () => {
       };
 
       const validation = validationService.validateBuild(build, flaskAnalysis);
-      const bleedIssue = validation.criticalIssues.find(i => i.title.includes('Bleed'));
+      // Ailment immunity gaps are warnings (flask/charm-fixable), not critical.
+      const bleedIssue = validation.warnings.find(i => i.title.includes('Bleed'));
       expect(bleedIssue).toBeDefined();
       expect(bleedIssue?.category).toBe('immunities');
     });
@@ -137,7 +138,7 @@ describe('ValidationService', () => {
       };
 
       const validation = validationService.validateBuild(build, flaskAnalysis);
-      const freezeIssue = validation.criticalIssues.find(i => i.title.includes('Freeze'));
+      const freezeIssue = validation.warnings.find(i => i.title.includes('Freeze'));
       expect(freezeIssue).toBeDefined();
     });
 
@@ -224,7 +225,8 @@ describe('ValidationService', () => {
       const validation = validationService.validateBuild(brokenBuild, flaskAnalysis);
       expect(validation.overallScore).toBeLessThan(3);
       expect(validation.isValid).toBe(false);
-      expect(validation.criticalIssues.length).toBeGreaterThan(4);
+      // 3 uncapped resists + low life pool = 4 critical issues for this fixture
+      expect(validation.criticalIssues.length).toBeGreaterThanOrEqual(4);
     });
   });
 

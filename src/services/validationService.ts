@@ -368,11 +368,11 @@ export class ValidationService {
         title: 'No Bleed Immunity',
         description: 'You have no way to remove bleeding. This is dangerous as bleeds can kill you rapidly while moving.',
         suggestions: [
-          `Add a "of Staunching" suffix to your life flask`,
-          `Use a flask with "Grants Immunity to Bleeding"`,
-          `Corrupted Blood immunity can come from jewel corruptions`,
+          `Equip a Staunching Charm to remove/avoid bleed (PoE2 uses charms for ailment removal)`,
+          `Look for "cannot bleed" or bleed-avoidance mods on gear`,
+          `Higher maximum Life raises your effective bleed survivability`,
         ],
-        location: 'Flasks',
+        location: 'Charms & Gear',
       });
     }
 

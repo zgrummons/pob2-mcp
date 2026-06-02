@@ -100,13 +100,10 @@ describe('PoBLuaApiClient - Simple Tests', () => {
     it('should have setMainSelection method', () => {
       expect(typeof client.setMainSelection).toBe('function');
     });
-  });
-});
 
-describe('PoBLuaTcpClient - API surface', () => {
-  // Just verify the class exists and can be imported
-  it('should be able to import PoBLuaTcpClient', async () => {
-    const { PoBLuaTcpClient } = await import('../../src/pobLuaBridge');
-    expect(PoBLuaTcpClient).toBeDefined();
+    it('should have PoE2 list_gems / get_classes methods', () => {
+      expect(typeof client.listGems).toBe('function');
+      expect(typeof client.getClasses).toBe('function');
+    });
   });
 });
