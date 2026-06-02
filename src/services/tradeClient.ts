@@ -24,6 +24,9 @@ export class TradeApiClient {
   // so the StatMapper automatically picks up PoE2 trade stats. Override with
   // POE_TRADE_BASE if GGG changes the path.
   private readonly baseUrl = process.env.POE_TRADE_BASE || 'https://www.pathofexile.com/api/trade2';
+  // PoE2 search/fetch include the realm (the /data/leagues feed reports realm:"poe2",
+  // and the site uses /trade2/search/poe2/<league>). Override with POE_TRADE_REALM.
+  private readonly realm = process.env.POE_TRADE_REALM || 'poe2';
   private readonly limiter: Bottleneck;
   private readonly cache = new Map<string, CacheEntry<any>>();
   private readonly defaultCacheTTL: number;
@@ -69,7 +72,7 @@ export class TradeApiClient {
       return cached;
     }
 
-    const url = `${this.baseUrl}/search/${encodeURIComponent(league)}`;
+    const url = `${this.baseUrl}/search/${this.realm}/${encodeURIComponent(league)}`;
     const result = await this.limiter.schedule(() =>
       this.makeRequest<SearchResult>('POST', url, query)
     );
@@ -99,8 +102,8 @@ export class TradeApiClient {
 
     const idsParam = itemIds.join(',');
     const url = queryId
-      ? `${this.baseUrl}/fetch/${idsParam}?query=${queryId}`
-      : `${this.baseUrl}/fetch/${idsParam}`;
+      ? `${this.baseUrl}/fetch/${idsParam}?query=${queryId}&realm=${this.realm}`
+      : `${this.baseUrl}/fetch/${idsParam}?realm=${this.realm}`;
 
     const result = await this.limiter.schedule(() =>
       this.makeRequest<FetchResult>('GET', url)
