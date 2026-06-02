@@ -14,7 +14,9 @@ It is a port of [`pob-mcp`](../pob-mcp) (PoE1) to PoE2. The high-fidelity calcul
 >
 > **Engine-backed PoE2 tools to prefer:** `analyze_skills`, `suggest_supports` (incl. `measure_dps`), `list_gems`, `get_classes` — all sourced from the PoB2 engine. The defensive analyzer and `validate_build` have been retuned for PoE2 mechanics (evade/block/deflect, Spirit, charms; no spell suppression).
 >
-> **Disabled by default (PoE1-shaped, opt-in):** the legacy skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, `validate_gem_quality`, `compare_gem_setups`, `gem_upgrade_path`) — `POB_LEGACY_GEM_TOOLS=true`; `poe.ninja` — `POE_NINJA_ENABLED=true`; Trade API — `POE_TRADE_ENABLED=true`. These carry PoE1 gem/league/endpoint assumptions. Class/ascendancy ID tables in some descriptions and bandit/pantheon config (absent in PoE2) are also PoE1 remnants.
+> **poe.ninja** currency tools are ported to the PoE2 economy endpoint and on by default (`POE_NINJA_DISABLED=true` to hide).
+>
+> **Disabled by default (PoE1-shaped, opt-in):** the legacy skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, `validate_gem_quality`, `compare_gem_setups`, `gem_upgrade_path`) — `POB_LEGACY_GEM_TOOLS=true`; Trade API — `POE_TRADE_ENABLED=true` (PoE2 trade2 endpoints; see below). Class/ascendancy ID tables in some descriptions and bandit/pantheon config (absent in PoE2) are PoE1 remnants.
 >
 > **PoE2 engine differences already handled in the bridge:** `PassiveSpec:ImportFromNodeList` signature (extra `className` / `weaponSets` params), generic config passthrough (no bandit/pantheon), flask-slot validation against the actual item set, `Spirit` in default stat export, and stdout reserved for the JSON protocol (PoB logging redirected to stderr).
 
@@ -146,7 +148,7 @@ npm run build
 | `POB_CMD` | `luajit` | LuaJIT binary path |
 | `POB_TIMEOUT_MS` | `10000` | Lua request timeout (ms) |
 | `POE_TRADE_ENABLED` | `false` | Enable Trade API tools (⚠️ PoE1 endpoints — unverified for PoE2) |
-| `POE_NINJA_ENABLED` | `false` | Expose poe.ninja tools (⚠️ PoE1 endpoints/leagues — unverified for PoE2; off by default) |
+| `POE_NINJA_DISABLED` | `false` | Set `"true"` to hide poe.ninja tools (ported to the PoE2 economy endpoint; on by default) |
 | `POB_LEGACY_GEM_TOOLS` | `false` | Expose the legacy PoE1 skill-gem tools (⚠️ PoE1 gem model; prefer the engine-backed gem tools) |
 
 ### Setting Up the Lua Bridge
@@ -342,11 +344,16 @@ Snapshots are stored in `POB_DIRECTORY/.pob-mcp/snapshots/`.
 
 | Tool | Description |
 |---|---|
-| `get_currency_rates` | Live exchange rates for all currencies (Chaos Orb equivalent) |
-| `find_arbitrage` | Detect profitable currency trading loops |
+| `get_currency_rates` | Live PoE2 currency exchange rates (Chaos Orb equivalent) |
+| `find_arbitrage` | Detect profitable currency trading loops (see note) |
 | `calculate_trading_profit` | Evaluate a specific trading chain |
 
-Rates are updated every 5 minutes from poe.ninja. Pass the **exact** league name (e.g., `Standard`, `Hardcore`, `Settlers`).
+Sourced from the **PoE2** poe.ninja economy endpoint (`/poe2/api/economy/currencyexchange`), cached 5 min.
+Pass the **exact**, case-sensitive PoE2 league name (e.g., `Standard`, `Rise of the Abyssal`).
+
+> **Note:** the PoE2 currency-exchange feed exposes a single value per currency (no separate buy/sell
+> spread), so `find_arbitrage` generally returns nothing — round-trips evaluate to ~0% profit.
+> `get_currency_rates` and `calculate_trading_profit` are the useful tools here.
 
 ### Trade API Tools (Require `POE_TRADE_ENABLED=true`)
 

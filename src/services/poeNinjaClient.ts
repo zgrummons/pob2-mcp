@@ -74,16 +74,65 @@ export interface ArbitrageOpportunity {
   }>;
 }
 
+/** PoE2 poe.ninja currency-exchange response shapes. */
+interface Poe2ExchangeLine {
+  id: string;
+  primaryValue: number;       // chaos-equivalent value
+  volumePrimaryValue?: number;
+}
+interface Poe2ExchangeItem {
+  id: string;
+  name: string;
+  icon?: string;
+  tradeId?: string;
+}
+interface Poe2ExchangeOverview {
+  core?: { version?: string; timestamp?: number };
+  lines: Poe2ExchangeLine[];
+  items: Poe2ExchangeItem[];
+}
+
 /**
- * Client for fetching data from poe.ninja API
+ * Client for fetching data from the poe.ninja PoE2 economy API.
+ *
+ * PoE2 endpoint: /poe2/api/economy/currencyexchange/overview?leagueName=..&overviewName=Currency
+ * Response shape differs from PoE1 ({lines:[{id,primaryValue}], items:[{id,name}]}), so we
+ * transform it into the existing CurrencyOverview shape used by the handlers.
+ *
+ * Note: the currency-exchange feed exposes a single value per currency (no bid/ask spread),
+ * so arbitrage round-trips evaluate to ~0% — find_arbitrage will typically return nothing.
  */
 export class PoeNinjaClient {
-  private baseUrl = 'https://poe.ninja/poe1/api/economy/exchange/current';
+  private baseUrl = 'https://poe.ninja/poe2/api/economy/currencyexchange';
   private cache = new Map<string, { data: any; timestamp: number }>();
   private cacheTTL = 300000; // 5 minutes
 
+  /** Transform a raw PoE2 exchange overview into the legacy CurrencyOverview shape. */
+  private transformPoe2Overview(data: Poe2ExchangeOverview): CurrencyOverview {
+    const nameById = new Map<string, string>();
+    for (const it of data.items || []) {
+      if (it.id) nameById.set(it.id, it.name);
+    }
+    const lines: CurrencyRate[] = [];
+    for (const ln of data.lines || []) {
+      const value = Number(ln.primaryValue) || 0;
+      if (value <= 0) continue;
+      lines.push({
+        currencyTypeName: nameById.get(ln.id) || ln.id,
+        chaosEquivalent: value,
+        detailsId: ln.id,
+      });
+    }
+    const currencyDetails = (data.items || []).map((it, i) => ({
+      id: i,
+      name: it.name,
+      tradeId: it.tradeId,
+    }));
+    return { lines, currencyDetails };
+  }
+
   /**
-   * Get currency rates for a league
+   * Get currency rates for a PoE2 league (e.g. "Standard", "Rise of the Abyssal").
    */
   async getCurrencyRates(league: string): Promise<CurrencyOverview> {
     const cacheKey = `currency:${league}`;
@@ -92,46 +141,29 @@ export class PoeNinjaClient {
       return cached;
     }
 
-    const url = `${this.baseUrl}/overview?league=${encodeURIComponent(league)}&type=Currency`;
+    const url = `${this.baseUrl}/overview?leagueName=${encodeURIComponent(league)}&overviewName=Currency`;
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'pob-mcp-server/1.0',
+        'User-Agent': 'pob2-mcp-server/0.1',
+        'Accept': 'application/json',
       },
     });
 
     if (!response.ok) {
-      throw new Error(`poe.ninja API request failed (${response.status}): ${await response.text()}`);
+      throw new Error(`poe.ninja PoE2 API request failed (${response.status}): ${await response.text()}`);
     }
 
-    const data = await response.json();
+    const raw = (await response.json()) as Poe2ExchangeOverview;
+    const data = this.transformPoe2Overview(raw);
     this.putInCache(cacheKey, data);
     return data;
   }
 
   /**
-   * Get fragment rates for a league
+   * Fragments are not a distinct PoE2 currency-exchange category; fold into currency rates.
    */
   async getFragmentRates(league: string): Promise<CurrencyOverview> {
-    const cacheKey = `fragment:${league}`;
-    const cached = this.getFromCache(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const url = `${this.baseUrl}/overview?league=${encodeURIComponent(league)}&type=Fragment`;
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'pob-mcp-server/1.0',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`poe.ninja API request failed (${response.status}): ${await response.text()}`);
-    }
-
-    const data = await response.json();
-    this.putInCache(cacheKey, data);
-    return data;
+    return this.getCurrencyRates(league);
   }
 
   /**
