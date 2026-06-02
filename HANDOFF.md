@@ -132,11 +132,13 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   path 404s). Base currency is **Exalted Orb** (primaryValue=1), not Chaos — map anchors Exalted=1,
   output relabelled to `ex`. Verified against `Runes of Aldur` (48 currencies, Mirror 50,990 ex). On by
   default (`POE_NINJA_DISABLED=true`). `find_arbitrage` inert (spread-less feed). Unit-tested.
-- **Trade API ported to PoE2 `trade2`** — base `…/api/trade2`; search is `/search/poe2/<league>` and
-  fetch passes `realm=poe2` (confirmed from `/data/leagues` reporting `realm:"poe2"`). StatMapper
-  auto-loads PoE2 trade stats. Optional `POE_SESSION_ID` (POESESSID) + `POE_TRADE_BASE`/`POE_TRADE_REALM`/
-  `POE_TRADE_USER_AGENT`. Behind `POE_TRADE_ENABLED`; Cloudflare/session-gated — search/fetch round-trip
-  not yet live-confirmed (needs a real session).
+- **Trade API ported to PoE2 `trade2` — round-trip VERIFIED** — search `/search/poe2/<league>` returns
+  `{id,result[],total}`; fetch `/fetch/<ids>?query=<id>&realm=poe2` returns `{result:[{id,listing,item}]}`
+  with `item.realm:"poe2"`, `listing.price{amount,currency}` (PoE2 currency codes e.g. `aug`). Confirmed
+  against a live `Runes of Aldur` query; `tradeTypes` (SearchResult/FetchResult/ItemListing/TradePrice)
+  match the payload, so parsing is correct. StatMapper auto-loads PoE2 trade stats from `…/api/trade2`.
+  Behind `POE_TRADE_ENABLED`; the **server** needs `POE_SESSION_ID` (POESESSID) since it's not a browser
+  (the browser test passed via same-origin session). Env: `POE_TRADE_BASE`/`POE_TRADE_REALM`/`POE_TRADE_USER_AGENT`.
 - **PoE2 build parsing** — `parseFlasks` reads Charm slots (ailment immunity from Thawing/Staunching/…),
   no longer assumes 5 flask slots; build issues flag **Spirit** over-reservation.
 - **Full unit + integration suite green** (257 tests).
