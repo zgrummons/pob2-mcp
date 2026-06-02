@@ -501,7 +501,7 @@ export function getLuaToolSchemas(): any[] {
     },
     {
       name: "suggest_supports",
-      description: "Suggest compatible support gems for a socket group's active skill, drawn from PoB2's gem database and ranked by tag relevance (PoE2-correct). Excludes supports already socketed.",
+      description: "Suggest compatible support gems for a socket group's active skill, drawn from PoB2's gem database (PoE2-correct). By default ranks by tag relevance (fast). With measure_dps=true, ranks by REAL DPS gain — each candidate is transiently socketed, the build recalculated, and then removed. Excludes supports already socketed.",
       inputSchema: {
         type: "object",
         properties: {
@@ -511,7 +511,11 @@ export function getLuaToolSchemas(): any[] {
           },
           count: {
             type: "number",
-            description: "How many suggestions to return (default 8, max 20).",
+            description: "How many suggestions to return (tag mode default 8/max 20; measured mode default 6/max 12).",
+          },
+          measure_dps: {
+            type: "boolean",
+            description: "If true, rank by measured DPS gain via the engine instead of the tag heuristic. Slower (sockets/recalcs each candidate). Best on a fully geared, loaded build. Default false.",
           },
         },
         required: ["group_index"],

@@ -56,7 +56,12 @@ export async function handleAnalyzeSkillsPoe2(context: LuaHandlerContext) {
   });
 }
 
-export async function handleSuggestSupportsPoe2(context: LuaHandlerContext, groupIndex: number, count?: number) {
+export async function handleSuggestSupportsPoe2(
+  context: LuaHandlerContext,
+  groupIndex: number,
+  count?: number,
+  measureDps?: boolean
+) {
   return wrapHandler("suggest supports (PoE2)", async () => {
     await context.ensureLuaClient();
     const luaClient = context.getLuaClient();
@@ -64,6 +69,32 @@ export async function handleSuggestSupportsPoe2(context: LuaHandlerContext, grou
 
     if (groupIndex == null || Number.isNaN(Number(groupIndex))) {
       throw new Error("group_index is required (see analyze_skills for group numbers).");
+    }
+
+    // Measured (real-DPS) path: socket each candidate, recalc, rank by delta.
+    if (measureDps) {
+      const res = await service.measureSupportDps(luaClient, Number(groupIndex), { count: count || 6 });
+      const lines: string[] = ["=== PoE2 Support Suggestions (measured DPS) ===", ""];
+      if (!res.activeSkill) {
+        lines.push(`Group ${groupIndex} has no active skill gem, so nothing can be measured.`);
+        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      }
+      lines.push(`Active skill: ${res.activeSkill}`);
+      lines.push(`Baseline DPS: ${res.baselineDps.toLocaleString()}`);
+      if (res.note) lines.push(`(${res.note})`);
+      lines.push("", "Candidates ranked by measured DPS gain (each socketed, recalculated, then removed):", "");
+      if (res.measured.length === 0) {
+        lines.push("No compatible unused supports to measure.");
+      } else {
+        for (const m of res.measured) {
+          const sign = m.delta >= 0 ? "+" : "";
+          const pct = res.baselineDps > 0 ? ` (${sign}${m.deltaPct.toFixed(1)}%)` : "";
+          lines.push(`- **${m.name}** — ${sign}${Math.round(m.delta).toLocaleString()} DPS${pct} → ${Math.round(m.dps).toLocaleString()}`);
+          lines.push(`    tags: ${m.tags}`);
+        }
+      }
+      lines.push("", "Note: measured on the in-memory build (transiently socketed then removed; build restored).");
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
 
     const res = await service.suggestSupports(luaClient, Number(groupIndex), Math.min(count || 8, 20));
@@ -88,7 +119,7 @@ export async function handleSuggestSupportsPoe2(context: LuaHandlerContext, grou
       }
     }
     lines.push("");
-    lines.push("Note: ranking is a tag-based heuristic. Socket a support and re-check stats to confirm its real value.");
+    lines.push("Note: ranking is a tag-based heuristic. Pass measure_dps=true to rank by real DPS gain instead.");
     return { content: [{ type: "text" as const, text: lines.join("\n") }] };
   });
 }

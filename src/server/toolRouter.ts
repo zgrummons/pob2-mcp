@@ -298,7 +298,8 @@ export async function routeToolCall(
       return await handleSuggestSupportsPoe2(
         luaContext,
         (args?.group_index ?? args?.groupIndex) as number,
-        (args?.count) as number | undefined
+        (args?.count) as number | undefined,
+        (args?.measure_dps ?? args?.measureDps) as boolean | undefined
       );
 
     case "list_gems":
