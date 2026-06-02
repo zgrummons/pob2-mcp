@@ -366,8 +366,9 @@ Ported to the **PoE2 `trade2`** endpoints (`https://www.pathofexile.com/api/trad
 leagues are fetched from this base, so the stat mapper picks up PoE2 trade stats automatically.
 
 > **Heads up:** the official trade API is behind Cloudflare and most endpoints require a logged-in
-> session — set `POE_SESSION_ID` to your `POESESSID` cookie. It is also strictly rate-limited. These
-> tools could not be live-verified from this environment; treat as best-effort and report issues.
+> session — set `POE_SESSION_ID` to your `POESESSID` cookie. It is also strictly rate-limited.
+> **Verified working server-side** (search→fetch through Cloudflare with only `POE_SESSION_ID` set).
+> Note POESESSID expires periodically; refresh it if you start getting 401/403s.
 
 | Tool | Description |
 |---|---|

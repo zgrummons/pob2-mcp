@@ -137,15 +137,17 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   with `item.realm:"poe2"`, `listing.price{amount,currency}` (PoE2 currency codes e.g. `aug`). Confirmed
   against a live `Runes of Aldur` query; `tradeTypes` (SearchResult/FetchResult/ItemListing/TradePrice)
   match the payload, so parsing is correct. StatMapper auto-loads PoE2 trade stats from `…/api/trade2`.
-  Behind `POE_TRADE_ENABLED`; the **server** needs `POE_SESSION_ID` (POESESSID) since it's not a browser
-  (the browser test passed via same-origin session). Env: `POE_TRADE_BASE`/`POE_TRADE_REALM`/`POE_TRADE_USER_AGENT`.
+  Behind `POE_TRADE_ENABLED`; the **server** needs `POE_SESSION_ID` (POESESSID). Env:
+  `POE_TRADE_BASE`/`POE_TRADE_REALM`/`POE_TRADE_USER_AGENT`.
+  **Server-side VERIFIED:** the compiled `tradeClient` (Node, not a browser) ran search→fetch through
+  Cloudflare with only `POE_SESSION_ID` set — no 403 (real listing returned, `realm:poe2`). So the trade
+  tools work headless as long as a valid POESESSID is provided.
 - **PoE2 build parsing** — `parseFlasks` reads Charm slots (ailment immunity from Thawing/Staunching/…),
   no longer assumes 5 flask slots; build issues flag **Spirit** over-reservation.
 - **Full unit + integration suite green** (257 tests).
 
 ### Carried over from PoE1 — needs PoE2 review
-- Trade API — ported to `trade2` endpoints but **unverified live** (Cloudflare/POESESSID/rate limits);
-  needs a real session to confirm. poe.ninja `find_arbitrage` inert (no spread in PoE2 feed).
+- poe.ninja `find_arbitrage` is inert (the PoE2 currency-exchange feed has no buy/sell spread).
 - Legacy skill-gem tools (`skillGemService.ts`) — still PoE1 internally; **deregistered by default**.
   Reimplement on engine data or delete the dead code if never re-enabling.
 - `clusterJewelHandlers` (non-MVP) — PoE1 cluster jewel model + needs the `PathOfBuilding2` fix.
@@ -154,14 +156,17 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 
 ## Recommended next steps (in order)
 
-1. Live-verify the Trade API against a real PoE2 session (`POE_SESSION_ID`); confirm the `trade2`
-   search/fetch paths and adjust if GGG uses a realm segment.
-2. Exercise `analyze_build` / `validate_build` on real imported PoE2 build codes (weapon-swap sets,
-   charms, Spirit reservation) end to end.
-3. Delete the dead `skillGemService.ts` / `skillGemHandlers.ts` (and PoE1 schemas) if the legacy gem
+All external-input verifications are complete (build pipeline, poe.ninja, and server-side trade are
+live-verified). Remaining polish, lower priority:
+
+1. Exercise `analyze_build` / `validate_build` on more real PoE2 build codes — especially weapon-swap
+   sets and multi-spec — to confirm the XML paths beyond the single Monk build tested.
+2. Delete the dead `skillGemService.ts` / `skillGemHandlers.ts` (and PoE1 schemas) if the legacy gem
    tools will never be re-enabled — currently deregistered but still compiled.
-4. Validate the PoE2 life/defensive thresholds against real endgame builds (current numbers are
+3. Validate the PoE2 life/defensive thresholds against real endgame builds (current numbers are
    reasoned estimates).
+4. Wire a non-secret way to supply `POE_SESSION_ID` (it expires) and surface a clear 401/403 message
+   in the trade handlers prompting a refresh.
 
 ## Memory
 
