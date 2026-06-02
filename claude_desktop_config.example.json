@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "pob2": {
+      "command": "node",
+      "args": [
+        "C:/Users/YOUR_USERNAME/source/repos/pob-mcp/pob2-mcp/build/index.js"
+      ],
+      "env": {
+        "POB_DIRECTORY": "C:/Users/YOUR_USERNAME/Documents/Path of Building 2/Builds",
+        "POB_LUA_ENABLED": "true",
+        "POB_FORK_PATH": "C:/Users/YOUR_USERNAME/source/repos/pob-mcp/PathOfBuilding-PoE2/src",
+        "POB_CMD": "luajit",
+        "POB_TIMEOUT_MS": "30000"
+      }
+    }
+  }
+}

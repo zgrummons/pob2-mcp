@@ -1,0 +1,1143 @@
+import { XMLParser } from "fast-xml-parser";
+import fs from "fs/promises";
+import path from "path";
+import type { PoBBuild, CachedBuild, ParsedConfiguration, ConfigInput, ConfigSet, Flask, FlaskAnalysis, Jewel, JewelAnalysis } from "../types.js";
+import { sanitizeBuildName } from "../utils/pathSanitizer.js";
+
+const CACHE_TTL_MS = 60_000;  // 60 seconds
+const CACHE_MAX_SIZE = 20;
+
+export class BuildService {
+  private parser: XMLParser;
+  private pobDirectory: string;
+  private buildCache: Map<string, CachedBuild> = new Map();
+
+  constructor(pobDirectory: string) {
+    this.parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "",
+    });
+    this.pobDirectory = pobDirectory;
+  }
+
+  async listBuilds(): Promise<string[]> {
+    try {
+      const builds: string[] = [];
+
+      // Recursive function to find XML files
+      const findXmlFiles = async (dir: string, relativePath: string = "") => {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          // Skip hidden files and temp files
+          if (entry.name.startsWith('.') || entry.name.startsWith('~~temp~~')) {
+            continue;
+          }
+
+          const fullPath = path.join(dir, entry.name);
+          const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+
+          if (entry.isDirectory()) {
+            // Recursively search subdirectories
+            await findXmlFiles(fullPath, relPath);
+          } else if (entry.isFile() && entry.name.endsWith('.xml')) {
+            builds.push(relPath);
+          }
+        }
+      };
+
+      await findXmlFiles(this.pobDirectory);
+      return builds;
+    } catch (error) {
+      console.error("Could not read PoB directory:", error);
+      return [];
+    }
+  }
+
+  async readBuild(buildName: string): Promise<PoBBuild> {
+    // Check cache — evict if stale
+    const cached = this.buildCache.get(buildName);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    // Cache miss or expired — read from file
+    const buildPath = sanitizeBuildName(buildName, this.pobDirectory);
+    const content = await fs.readFile(buildPath, "utf-8");
+    const parsed = this.parser.parse(content);
+    // PoE2 PoB serializes the root element as <PathOfBuilding2>; PoE1 uses
+    // <PathOfBuilding>. Normalize so all downstream code can read build.Build etc.
+    const buildData = parsed.PathOfBuilding ?? parsed.PathOfBuilding2;
+
+    // Evict oldest entry if at capacity
+    if (this.buildCache.size >= CACHE_MAX_SIZE) {
+      const oldest = Array.from(this.buildCache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+      if (oldest) this.buildCache.delete(oldest[0]);
+    }
+
+    this.buildCache.set(buildName, { data: buildData, timestamp: Date.now() });
+    return buildData;
+  }
+
+  generateBuildSummary(build: PoBBuild): string {
+    let summary = "=== Path of Building Build Summary ===\n\n";
+
+    // Basic info
+    if (build.Build) {
+      summary += `Class: ${build.Build.className || "Unknown"}\n`;
+      summary += `Ascendancy: ${build.Build.ascendClassName || "None"}\n`;
+      summary += `Level: ${build.Build.level || "Unknown"}\n\n`;
+
+      // Stats
+      if (build.Build.PlayerStat) {
+        summary += "=== Stats ===\n";
+        const stats = Array.isArray(build.Build.PlayerStat)
+          ? build.Build.PlayerStat
+          : [build.Build.PlayerStat];
+
+        for (const stat of stats) {
+          summary += `${stat.stat}: ${stat.value}\n`;
+        }
+        summary += "\n";
+      }
+    }
+
+    // Skills — handle single SkillSet or array of SkillSets
+    {
+      const skillSetRaw = build.Skills?.SkillSet;
+      const skillSets: any[] = skillSetRaw
+        ? (Array.isArray(skillSetRaw) ? skillSetRaw : [skillSetRaw])
+        : [];
+      const activeSkillSetId = String((build.Skills as any)?.activeSkillSet ?? '1');
+      const activeSkillSet = skillSets.find((ss: any) => String(ss.id) === activeSkillSetId) ?? skillSets[0];
+      if (activeSkillSet?.Skill) {
+        const setLabel = skillSets.length > 1 ? ` (Set ${activeSkillSetId} of ${skillSets.length})` : '';
+        summary += `=== Skills${setLabel} ===\n`;
+        const skills = Array.isArray(activeSkillSet.Skill) ? activeSkillSet.Skill : [activeSkillSet.Skill];
+        for (const skill of skills) {
+          if (skill.Gem) {
+            const gems = Array.isArray(skill.Gem) ? skill.Gem : [skill.Gem];
+            summary += gems.map((g: any) => `${g.nameSpec || g.name || 'Unknown'} (${g.level}/${g.quality})`).join(" - ");
+            summary += "\n";
+          }
+        }
+        summary += "\n";
+      }
+    }
+
+    // Items — build an id→text map from the Item array, then render by slot
+    if (build.Items) {
+      const rawItems = build.Items.Item
+        ? (Array.isArray(build.Items.Item) ? build.Items.Item : [build.Items.Item])
+        : [];
+      const itemMap = new Map<string, string>();
+      for (const item of rawItems) {
+        if (item.id && item['#text']) {
+          itemMap.set(item.id, item['#text']);
+        }
+      }
+
+      // Handle single ItemSet or array of ItemSets
+      const itemSetRaw = build.Items.ItemSet;
+      const itemSets: any[] = itemSetRaw
+        ? (Array.isArray(itemSetRaw) ? itemSetRaw : [itemSetRaw])
+        : [];
+      const activeItemSetId = String((build.Items as any)?.activeItemSet ?? '1');
+      const activeItemSet = itemSets.find((is: any) => String(is.id) === activeItemSetId) ?? itemSets[0];
+
+      const slots: any[] = activeItemSet?.Slot
+        ? (Array.isArray(activeItemSet.Slot) ? activeItemSet.Slot : [activeItemSet.Slot])
+        : [];
+
+      const equippedSlots = slots.filter((s: any) => s.itemId && itemMap.has(s.itemId));
+      if (equippedSlots.length > 0) {
+        const setLabel = itemSets.length > 1 ? ` (Set ${activeItemSetId} of ${itemSets.length})` : '';
+        summary += `=== Items${setLabel} ===\n`;
+        for (const slot of equippedSlots) {
+          const text = itemMap.get(slot.itemId!)!;
+          const firstLine = text.split("\n").find(l => l.trim()) || "Unknown Item";
+          summary += `${slot.name}: ${firstLine}\n`;
+        }
+        summary += "\n";
+      }
+    }
+
+    // Notes
+    if (build.Notes) {
+      summary += "=== Notes ===\n";
+      summary += build.Notes.trim() + "\n";
+    }
+
+    return summary;
+  }
+
+  getActiveSpec(build: PoBBuild): any {
+    if (!build.Tree) {
+      return null;
+    }
+
+    const specs = build.Tree.Spec;
+    if (!specs) {
+      return null;
+    }
+
+    // If Spec is an array (multiple specs), find the active one.
+    // activeSpec is 1-indexed in PoB XML; convert to 0-indexed for the array.
+    if (Array.isArray(specs)) {
+      const activeSpecOneBased = parseInt(build.Tree.activeSpec || "1", 10);
+      const activeSpecIndex = activeSpecOneBased - 1;
+      return specs[activeSpecIndex] ?? specs[specs.length - 1];
+    }
+
+    // Single spec - return it directly
+    return specs;
+  }
+
+  parseAllocatedNodes(build: PoBBuild): string[] {
+    const spec = this.getActiveSpec(build);
+    if (!spec?.nodes) {
+      return [];
+    }
+
+    const nodesStr = spec.nodes;
+    return nodesStr.split(',').map((n: string) => n.trim()).filter((n: string) => n.length > 0);
+  }
+
+  extractBuildVersion(build: PoBBuild): string {
+    const spec = this.getActiveSpec(build);
+
+    if (!spec) {
+      return "Unknown";
+    }
+
+    // Try to extract from Tree URL
+    if (spec.URL) {
+      const urlMatch = spec.URL.match(/version=([^&]+)/);
+      if (urlMatch) {
+        return urlMatch[1];
+      }
+    }
+
+    // Try to extract from treeVersion field
+    if (spec.treeVersion) {
+      return spec.treeVersion;
+    }
+
+    return "Unknown";
+  }
+
+  clearCache(): void {
+    this.buildCache.clear();
+  }
+
+  invalidateBuild(buildName: string): void {
+    this.buildCache.delete(buildName);
+  }
+
+  /**
+   * Parse configuration state from a PoB build
+   * Extracts active config set, charges, conditions, enemy settings, and multipliers
+   */
+  parseConfiguration(build: PoBBuild): ParsedConfiguration | null {
+    if (!build.Config) {
+      return null;
+    }
+
+    const activeConfigSetId = build.Config.activeConfigSet || "1";
+
+    // Get the active ConfigSet
+    let activeConfigSet: ConfigSet | undefined;
+    if (Array.isArray(build.Config.ConfigSet)) {
+      activeConfigSet = build.Config.ConfigSet.find(cs => cs.id === activeConfigSetId) || build.Config.ConfigSet[0];
+    } else {
+      activeConfigSet = build.Config.ConfigSet;
+    }
+
+    if (!activeConfigSet) {
+      return null;
+    }
+
+    const activeConfigSetTitle = activeConfigSet.title || "Default";
+
+    // Normalize inputs to array
+    const inputs = activeConfigSet.Input ?
+      (Array.isArray(activeConfigSet.Input) ? activeConfigSet.Input : [activeConfigSet.Input]) : [];
+
+    const placeholders = activeConfigSet.Placeholder ?
+      (Array.isArray(activeConfigSet.Placeholder) ? activeConfigSet.Placeholder : [activeConfigSet.Placeholder]) : [];
+
+    // Combine all inputs
+    const allInputsArray = [...inputs, ...placeholders];
+    const allInputs = new Map<string, ConfigInput>();
+
+    for (const input of allInputsArray) {
+      allInputs.set(input.name, input);
+    }
+
+    // Parse charge usage
+    const chargeUsage = {
+      powerCharges: this.getBooleanInput(allInputs, 'usePowerCharges'),
+      frenzyCharges: this.getBooleanInput(allInputs, 'useFrenzyCharges'),
+      enduranceCharges: this.getBooleanInput(allInputs, 'useEnduranceCharges'),
+    };
+
+    // Parse conditions (all keys starting with "condition")
+    const conditions: { [key: string]: boolean } = {};
+    for (const [name, input] of allInputs) {
+      if (name.startsWith('condition') && input.boolean !== undefined) {
+        conditions[name] = this.parseBoolean(input.boolean);
+      }
+    }
+
+    // Parse custom mods
+    const customMods = this.getStringInput(allInputs, 'customMods');
+
+    // Parse enemy settings
+    const enemySettings: ParsedConfiguration['enemySettings'] = {
+      level: this.getNumberInput(allInputs, 'enemyLevel'),
+      lightningResist: this.getNumberInput(allInputs, 'enemyLightningResist'),
+      coldResist: this.getNumberInput(allInputs, 'enemyColdResist'),
+      fireResist: this.getNumberInput(allInputs, 'enemyFireResist'),
+      chaosResist: this.getNumberInput(allInputs, 'enemyChaosResist'),
+      armour: this.getNumberInput(allInputs, 'enemyArmour'),
+      evasion: this.getNumberInput(allInputs, 'enemyEvasion'),
+    };
+
+    // Add all enemy-related settings
+    for (const [name, input] of allInputs) {
+      if (name.startsWith('enemy') && !enemySettings[name]) {
+        enemySettings[name] = this.getInputValue(input);
+      }
+    }
+
+    // Parse multipliers (all keys starting with "multiplier")
+    const multipliers: { [key: string]: number } = {};
+    for (const [name, input] of allInputs) {
+      if (name.startsWith('multiplier') && input.number !== undefined) {
+        const num = this.parseNumber(input.number);
+        if (num !== undefined) {
+          multipliers[name] = num;
+        }
+      }
+    }
+
+    // Parse bandit choice
+    const bandit = this.getStringInput(allInputs, 'bandit') ||
+                   build.Build?.bandit;
+
+    return {
+      activeConfigSetId,
+      activeConfigSetTitle,
+      chargeUsage,
+      conditions,
+      customMods,
+      enemySettings,
+      multipliers,
+      bandit,
+      allInputs,
+    };
+  }
+
+  private parseBoolean(value: string | boolean | undefined): boolean {
+    return value === undefined ? false : typeof value === 'boolean' ? value : value === 'true';
+  }
+
+  private parseNumber(value: string | number | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value === 'number') return value;
+    const num = parseFloat(value);
+    return isNaN(num) ? undefined : num;
+  }
+
+  private getInputValue(input: ConfigInput): any {
+    return input.boolean !== undefined ? this.parseBoolean(input.boolean) :
+           input.number !== undefined ? this.parseNumber(input.number) :
+           input.string;
+  }
+
+  private getBooleanInput(inputs: Map<string, ConfigInput>, name: string): boolean {
+    return this.parseBoolean(inputs.get(name)?.boolean);
+  }
+
+  private getStringInput(inputs: Map<string, ConfigInput>, name: string): string {
+    return inputs.get(name)?.string || '';
+  }
+
+  private getNumberInput(inputs: Map<string, ConfigInput>, name: string): number | undefined {
+    return this.parseNumber(inputs.get(name)?.number);
+  }
+
+  /**
+   * Format configuration for display
+   */
+  formatConfiguration(config: ParsedConfiguration): string {
+    let output = `=== Configuration: ${config.activeConfigSetTitle} ===\n\n`;
+
+    // Charges
+    output += "=== Charges ===\n";
+    output += `Power Charges: ${config.chargeUsage.powerCharges ? 'Active' : 'Inactive'}\n`;
+    output += `Frenzy Charges: ${config.chargeUsage.frenzyCharges ? 'Active' : 'Inactive'}\n`;
+    output += `Endurance Charges: ${config.chargeUsage.enduranceCharges ? 'Active' : 'Inactive'}\n\n`;
+
+    // Conditions
+    if (Object.keys(config.conditions).length > 0) {
+      output += "=== Active Conditions ===\n";
+      for (const [name, value] of Object.entries(config.conditions)) {
+        if (value) {
+          // Format condition name to be more readable
+          const readable = name
+            .replace('condition', '')
+            .replace(/([A-Z])/g, ' $1')
+            .trim();
+          output += `✓ ${readable}\n`;
+        }
+      }
+      output += "\n";
+    }
+
+    // Enemy Settings
+    output += "=== Enemy Settings ===\n";
+    if (config.enemySettings.level) output += `Level: ${config.enemySettings.level}\n`;
+    if (config.enemySettings.fireResist !== undefined) output += `Fire Resist: ${config.enemySettings.fireResist}%\n`;
+    if (config.enemySettings.coldResist !== undefined) output += `Cold Resist: ${config.enemySettings.coldResist}%\n`;
+    if (config.enemySettings.lightningResist !== undefined) output += `Lightning Resist: ${config.enemySettings.lightningResist}%\n`;
+    if (config.enemySettings.chaosResist !== undefined) output += `Chaos Resist: ${config.enemySettings.chaosResist}%\n`;
+    if (config.enemySettings.armour) output += `Armour: ${config.enemySettings.armour}\n`;
+    if (config.enemySettings.evasion) output += `Evasion: ${config.enemySettings.evasion}\n`;
+    output += "\n";
+
+    // Multipliers
+    if (Object.keys(config.multipliers).length > 0) {
+      output += "=== Multipliers ===\n";
+      for (const [name, value] of Object.entries(config.multipliers)) {
+        const readable = name
+          .replace('multiplier', '')
+          .replace(/([A-Z])/g, ' $1')
+          .trim();
+        output += `${readable}: ${value}\n`;
+      }
+      output += "\n";
+    }
+
+    // Custom Mods
+    if (config.customMods) {
+      output += "=== Custom Mods ===\n";
+      output += config.customMods + "\n\n";
+    }
+
+    // Bandit
+    if (config.bandit) {
+      output += `=== Bandit Choice ===\n${config.bandit}\n\n`;
+    }
+
+    return output;
+  }
+
+  /**
+   * Parse flask setup from a PoB build
+   * Extracts all equipped flasks with their mods and identifies immunities
+   */
+  parseFlasks(build: PoBBuild): FlaskAnalysis | null {
+    if (!build.Items?.ItemSet?.Slot) {
+      return null;
+    }
+
+    // Build a map of items by ID
+    const itemMap = new Map<string, string>();
+    if (build.Items.Item) {
+      const items = Array.isArray(build.Items.Item)
+        ? build.Items.Item
+        : [build.Items.Item];
+
+      for (const item of items) {
+        if (item.id && item['#text']) {
+          itemMap.set(item.id, item['#text']);
+        }
+      }
+    }
+
+    const slots = Array.isArray(build.Items.ItemSet.Slot)
+      ? build.Items.ItemSet.Slot
+      : [build.Items.ItemSet.Slot];
+
+    // Find flask slots (Flask 1-5)
+    const flaskSlots = slots.filter(slot =>
+      slot.name && slot.name.startsWith('Flask ')
+    );
+
+    if (flaskSlots.length === 0) {
+      return null;
+    }
+
+    const flasks: Flask[] = [];
+    const flaskTypes = {
+      life: 0,
+      mana: 0,
+      hybrid: 0,
+      utility: 0,
+    };
+
+    let hasBleedImmunity = false;
+    let hasFreezeImmunity = false;
+    let hasPoisonImmunity = false;
+    let hasCurseImmunity = false;
+    const uniqueFlasks: string[] = [];
+
+    // Parse each flask slot
+    for (const slot of flaskSlots) {
+      if (!slot.name) continue;
+
+      // Get item text either from inline Item or by looking up itemId
+      let itemText = slot.Item;
+      if (!itemText && slot.itemId) {
+        itemText = itemMap.get(slot.itemId);
+      }
+
+      if (!itemText) continue;
+
+      const slotNumber = parseInt(slot.name.replace('Flask ', ''), 10);
+      const isActive = slot.active === 'true' || slot.active === true;
+
+      const flask = this.parseFlaskItem(itemText, slotNumber, isActive);
+      if (flask) {
+        flasks.push(flask);
+
+        // Categorize flask type
+        const baseTypeLower = flask.baseType.toLowerCase();
+        if (baseTypeLower.includes('life') && baseTypeLower.includes('mana')) {
+          flaskTypes.hybrid++;
+        } else if (baseTypeLower.includes('life')) {
+          flaskTypes.life++;
+        } else if (baseTypeLower.includes('mana')) {
+          flaskTypes.mana++;
+        } else {
+          flaskTypes.utility++;
+        }
+
+        // Check for immunities
+        const allMods = flask.mods.join(' ').toLowerCase();
+        if (allMods.includes('bleed') || allMods.includes('corrupted blood')) {
+          hasBleedImmunity = true;
+        }
+        if (allMods.includes('freeze') || allMods.includes('chill')) {
+          hasFreezeImmunity = true;
+        }
+        if (allMods.includes('poison')) {
+          hasPoisonImmunity = true;
+        }
+        if (allMods.includes('curse')) {
+          hasCurseImmunity = true;
+        }
+
+        // Track unique flasks
+        if (flask.isUnique) {
+          uniqueFlasks.push(flask.name);
+        }
+      }
+    }
+
+    // Generate warnings and recommendations
+    const warnings: string[] = [];
+    const recommendations: string[] = [];
+
+    if (flasks.length === 0) {
+      warnings.push('No flasks equipped');
+    }
+
+    if (flasks.length < 5) {
+      warnings.push(`Only ${flasks.length}/5 flask slots filled`);
+    }
+
+    if (!hasBleedImmunity) {
+      recommendations.push('Add bleed immunity (common: "of Staunching" suffix on life flask)');
+    }
+
+    if (!hasFreezeImmunity) {
+      recommendations.push('Add freeze immunity (common: "of Heat" suffix or flask with chill/freeze immunity)');
+    }
+
+    if (flaskTypes.life === 0 && flaskTypes.hybrid === 0) {
+      warnings.push('No life flask equipped - risky for recovery');
+    }
+
+    const activeCount = flasks.filter(f => f.isActive).length;
+
+    return {
+      totalFlasks: flasks.length,
+      activeFlasks: activeCount,
+      flasks,
+      flaskTypes,
+      hasBleedImmunity,
+      hasFreezeImmunity,
+      hasPoisonImmunity,
+      hasCurseImmunity,
+      uniqueFlasks,
+      warnings,
+      recommendations,
+    };
+  }
+
+  private parseFlaskItem(itemText: string, slotNumber: number, isActive: boolean): Flask | null {
+    const lines = itemText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return null;
+
+    const rarity = lines[0].replace('Rarity: ', '') as Flask['rarity'];
+    const name = lines[1];
+
+    // Determine base type
+    let baseType = '';
+    let isUnique = rarity === 'UNIQUE';
+
+    if (isUnique) {
+      // For unique flasks, line 2 is the base type
+      baseType = lines[2] || name;
+    } else {
+      // For magic/rare, extract base from name or use line 2
+      baseType = lines[2] || this.extractFlaskBase(name);
+    }
+
+    // Parse quality and level requirement
+    let quality = 0;
+    let levelRequirement = 0;
+    let variant: string | undefined;
+
+    for (const line of lines) {
+      if (line.startsWith('Quality:')) {
+        quality = parseInt(line.replace('Quality: ', ''), 10) || 0;
+      } else if (line.startsWith('LevelReq:')) {
+        levelRequirement = parseInt(line.replace('LevelReq: ', ''), 10) || 0;
+      } else if (line.startsWith('Selected Variant:')) {
+        variant = line.replace('Selected Variant: ', '');
+      }
+    }
+
+    // Parse prefix and suffix
+    let prefix: string | undefined;
+    let suffix: string | undefined;
+
+    for (const line of lines) {
+      if (line.startsWith('Prefix:') && !line.includes('None')) {
+        prefix = line.replace(/Prefix:\s*{[^}]*}/, '').trim();
+      } else if (line.startsWith('Suffix:') && !line.includes('None')) {
+        suffix = line.replace(/Suffix:\s*{[^}]*}/, '').trim();
+      }
+    }
+
+    // Extract mods (lines that don't match metadata patterns)
+    const mods: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Skip metadata lines
+      if (
+        line.startsWith('Rarity:') ||
+        line.startsWith('Quality:') ||
+        line.startsWith('LevelReq:') ||
+        line.startsWith('Implicits:') ||
+        line.startsWith('Crafted:') ||
+        line.startsWith('Prefix:') ||
+        line.startsWith('Suffix:') ||
+        line.startsWith('Variant:') ||
+        line.startsWith('Selected Variant:') ||
+        line.startsWith('<ModRange') ||
+        line.includes('{variant:') ||
+        line.includes('{range:')
+      ) {
+        continue;
+      }
+
+      // Skip item name lines (first few lines after rarity)
+      if (i <= 2) continue;
+
+      // This is likely a mod
+      if (line.length > 0) {
+        mods.push(line);
+      }
+    }
+
+    return {
+      id: `flask_${slotNumber}`,
+      slotNumber,
+      isActive,
+      rarity,
+      name,
+      baseType,
+      quality,
+      levelRequirement,
+      prefix,
+      suffix,
+      mods,
+      isUnique,
+      variant,
+    };
+  }
+
+  private extractFlaskBase(name: string): string {
+    // Extract base flask type from magic/rare name
+    // e.g., "Surgeon's Diamond Flask of Rupturing" -> "Diamond Flask"
+
+    const flaskTypes = [
+      'Life Flask', 'Mana Flask', 'Hybrid Flask',
+      'Ruby Flask', 'Sapphire Flask', 'Topaz Flask', 'Granite Flask',
+      'Quicksilver Flask', 'Amethyst Flask', 'Quartz Flask', 'Jade Flask',
+      'Basalt Flask', 'Aquamarine Flask', 'Stibnite Flask', 'Sulphur Flask',
+      'Silver Flask', 'Bismuth Flask', 'Diamond Flask', 'Corundum Flask',
+      'Divine Life Flask', 'Divine Mana Flask', 'Eternal Life Flask', 'Eternal Mana Flask',
+    ];
+
+    for (const flaskType of flaskTypes) {
+      if (name.includes(flaskType)) {
+        return flaskType;
+      }
+    }
+
+    // Fallback: try to extract anything with "Flask" in it
+    const match = name.match(/(\w+\s)?Flask/);
+    return match ? match[0] : name;
+  }
+
+  /**
+   * Format flask analysis for display
+   */
+  formatFlaskAnalysis(analysis: FlaskAnalysis): string {
+    let output = '=== Flask Setup ===\n\n';
+
+    output += `Flasks Equipped: ${analysis.totalFlasks}/5\n`;
+    if (analysis.activeFlasks > 0) {
+      output += `Active in Config: ${analysis.activeFlasks}\n`;
+    }
+    output += '\n';
+
+    // Flask breakdown
+    output += '=== Flask Types ===\n';
+    if (analysis.flaskTypes.life > 0) output += `Life Flasks: ${analysis.flaskTypes.life}\n`;
+    if (analysis.flaskTypes.mana > 0) output += `Mana Flasks: ${analysis.flaskTypes.mana}\n`;
+    if (analysis.flaskTypes.hybrid > 0) output += `Hybrid Flasks: ${analysis.flaskTypes.hybrid}\n`;
+    if (analysis.flaskTypes.utility > 0) output += `Utility Flasks: ${analysis.flaskTypes.utility}\n`;
+    output += '\n';
+
+    // Immunities
+    output += '=== Immunities ===\n';
+    output += `Bleed/Corrupted Blood: ${analysis.hasBleedImmunity ? '✓' : '✗'}\n`;
+    output += `Freeze/Chill: ${analysis.hasFreezeImmunity ? '✓' : '✗'}\n`;
+    output += `Poison: ${analysis.hasPoisonImmunity ? '✓' : '✗'}\n`;
+    output += `Curses: ${analysis.hasCurseImmunity ? '✓' : '✗'}\n`;
+    output += '\n';
+
+    // Unique flasks
+    if (analysis.uniqueFlasks.length > 0) {
+      output += '=== Unique Flasks ===\n';
+      for (const flask of analysis.uniqueFlasks) {
+        output += `- ${flask}\n`;
+      }
+      output += '\n';
+    }
+
+    // Individual flasks
+    output += '=== Flask Details ===\n';
+    for (const flask of analysis.flasks) {
+      output += `\nFlask ${flask.slotNumber}: ${flask.name}`;
+      if (flask.isActive) output += ' [ACTIVE]';
+      output += '\n';
+      output += `  Base: ${flask.baseType}\n`;
+      output += `  Rarity: ${flask.rarity}`;
+      if (flask.quality > 0) output += ` | Quality: ${flask.quality}%`;
+      output += '\n';
+
+      if (flask.prefix) output += `  Prefix: ${flask.prefix}\n`;
+      if (flask.suffix) output += `  Suffix: ${flask.suffix}\n`;
+
+      if (flask.mods.length > 0) {
+        output += '  Mods:\n';
+        for (const mod of flask.mods) {
+          output += `    - ${mod}\n`;
+        }
+      }
+    }
+
+    // Warnings
+    if (analysis.warnings.length > 0) {
+      output += '\n=== Warnings ===\n';
+      for (const warning of analysis.warnings) {
+        output += `⚠️  ${warning}\n`;
+      }
+    }
+
+    // Recommendations
+    if (analysis.recommendations.length > 0) {
+      output += '\n=== Recommendations ===\n';
+      for (const rec of analysis.recommendations) {
+        output += `💡 ${rec}\n`;
+      }
+    }
+
+    return output;
+  }
+
+  /**
+   * Parse jewels from a PoB build
+   * Extracts all jewels (regular, cluster, timeless, abyss) and their socket placements
+   */
+  parseJewels(build: PoBBuild): JewelAnalysis | null {
+    if (!build.Items?.ItemSet) {
+      return null;
+    }
+
+    const itemSet = build.Items.ItemSet;
+    const slots = itemSet.Slot ? (Array.isArray(itemSet.Slot) ? itemSet.Slot : [itemSet.Slot]) : [];
+    const socketMappings = itemSet.SocketIdURL ? (Array.isArray(itemSet.SocketIdURL) ? itemSet.SocketIdURL : [itemSet.SocketIdURL]) : [];
+
+    // Build a map of itemId -> socket info
+    const socketMap = new Map<string, { nodeId: string; name: string }>();
+    for (const socket of socketMappings) {
+      if (socket.itemId && socket.nodeId) {
+        socketMap.set(socket.itemId, {
+          nodeId: socket.nodeId,
+          name: socket.name || `Jewel ${socket.nodeId}`,
+        });
+      }
+    }
+
+    const jewels: Jewel[] = [];
+    const jewelsByType = {
+      regular: 0,
+      abyss: 0,
+      cluster: 0,
+      timeless: 0,
+      unique: 0,
+    };
+    const clusterJewels = {
+      large: 0,
+      medium: 0,
+      small: 0,
+      notables: [] as string[],
+    };
+
+    // Parse jewels from slots
+    for (const slot of slots) {
+      if (!slot.Item || !slot.name) continue;
+
+      // Check if this is a jewel slot (by item text containing "Jewel")
+      const itemText = slot.Item;
+      if (!itemText.includes('Jewel')) continue;
+
+      const jewel = this.parseJewelItem(itemText, slot.itemId);
+      if (jewel) {
+        // Check if jewel is socketed
+        if (slot.itemId && socketMap.has(slot.itemId)) {
+          const socketInfo = socketMap.get(slot.itemId)!;
+          jewel.socketNodeId = socketInfo.nodeId;
+          jewel.socketName = socketInfo.name;
+        }
+
+        jewels.push(jewel);
+
+        // Categorize
+        if (jewel.isAbyssJewel) jewelsByType.abyss++;
+        else if (jewel.isClusterJewel) jewelsByType.cluster++;
+        else if (jewel.isTimelessJewel) jewelsByType.timeless++;
+        else if (jewel.rarity === 'UNIQUE') jewelsByType.unique++;
+        else jewelsByType.regular++;
+
+        // Track cluster jewel info
+        if (jewel.isClusterJewel) {
+          if (jewel.clusterNodeCount === 8) clusterJewels.large++;
+          else if (jewel.clusterNodeCount && jewel.clusterNodeCount >= 4 && jewel.clusterNodeCount <= 6) clusterJewels.medium++;
+          else if (jewel.clusterNodeCount && jewel.clusterNodeCount >= 2 && jewel.clusterNodeCount <= 3) clusterJewels.small++;
+
+          if (jewel.clusterNotables) {
+            clusterJewels.notables.push(...jewel.clusterNotables);
+          }
+        }
+      }
+    }
+
+    const socketedJewels = jewels.filter(j => j.socketNodeId).length;
+    const unsocketedJewels = jewels.length - socketedJewels;
+
+    // Build socket placement map
+    const socketPlacements = new Map<string, string>();
+    for (const jewel of jewels) {
+      if (jewel.socketNodeId) {
+        socketPlacements.set(jewel.socketNodeId, jewel.name);
+      }
+    }
+
+    // Generate warnings and recommendations
+    const warnings: string[] = [];
+    const recommendations: string[] = [];
+
+    if (unsocketedJewels > 0) {
+      warnings.push(`${unsocketedJewels} jewel(s) not socketed in the tree`);
+    }
+
+    return {
+      totalJewels: jewels.length,
+      socketedJewels,
+      unsocketedJewels,
+      jewelsByType,
+      clusterJewels,
+      jewels,
+      socketPlacements,
+      warnings,
+      recommendations,
+    };
+  }
+
+  private parseJewelItem(itemText: string, itemId?: string): Jewel | null {
+    const lines = itemText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) return null;
+
+    const rarity = lines[0].replace('Rarity: ', '') as Jewel['rarity'];
+    const name = lines[1];
+    const baseType = lines[2] || name;
+
+    // Detect jewel types
+    const isAbyssJewel = baseType.includes('Abyss Jewel') || name.includes('Abyss');
+    const isClusterJewel = baseType.includes('Cluster Jewel');
+    const isTimelessJewel = baseType.includes('Timeless Jewel');
+
+    // Parse level requirement
+    let levelRequirement = 0;
+    for (const line of lines) {
+      if (line.startsWith('LevelReq:')) {
+        levelRequirement = parseInt(line.replace('LevelReq: ', ''), 10) || 0;
+      }
+    }
+
+    // Parse prefix and suffix
+    let prefix: string | undefined;
+    let suffix: string | undefined;
+
+    for (const line of lines) {
+      if (line.startsWith('Prefix:') && !line.includes('None')) {
+        prefix = line.replace(/Prefix:\s*{[^}]*}/, '').trim();
+      } else if (line.startsWith('Suffix:') && !line.includes('None')) {
+        suffix = line.replace(/Suffix:\s*{[^}]*}/, '').trim();
+      }
+    }
+
+    // Parse cluster jewel specifics
+    let clusterJewelSkill: string | undefined;
+    let clusterNodeCount: number | undefined;
+    let clusterNotables: string[] = [];
+    let clusterSmallPassiveBonus: string | undefined;
+    let clusterJewelSockets: number | undefined;
+
+    if (isClusterJewel) {
+      for (const line of lines) {
+        if (line.startsWith('Cluster Jewel Skill:')) {
+          clusterJewelSkill = line.replace('Cluster Jewel Skill: ', '');
+        } else if (line.startsWith('Cluster Jewel Node Count:')) {
+          clusterNodeCount = parseInt(line.replace('Cluster Jewel Node Count: ', ''), 10);
+        } else if (line.includes('Added Passive Skill is')) {
+          // Extract notable name
+          const match = line.match(/Added Passive Skill is (.+)/);
+          if (match) {
+            clusterNotables.push(match[1]);
+          }
+        } else if (line.includes('Added Small Passive Skills grant:')) {
+          const match = line.match(/Added Small Passive Skills grant: (.+)/);
+          if (match) {
+            clusterSmallPassiveBonus = match[1];
+          }
+        } else if (line.match(/\d+ Added Passive Skills? are Jewel Sockets?/)) {
+          const match = line.match(/(\d+) Added Passive Skills? are Jewel Sockets?/);
+          if (match) {
+            clusterJewelSockets = parseInt(match[1], 10);
+          }
+        }
+      }
+    }
+
+    // Parse timeless jewel specifics
+    let timelessType: string | undefined;
+    let timelessConqueror: string | undefined;
+    let timelessSeed: number | undefined;
+    let radius: string | undefined;
+    let variant: string | undefined;
+
+    if (isTimelessJewel) {
+      timelessType = name;
+
+      for (const line of lines) {
+        if (line.startsWith('Radius:')) {
+          radius = line.replace('Radius: ', '');
+        } else if (line.startsWith('Selected Variant:')) {
+          variant = line.replace('Selected Variant: ', '');
+        } else if (line.includes('Bathed in the blood of')) {
+          // Extract conqueror and seed
+          const match = line.match(/Bathed in the blood of \(?(\d+)-?(\d+)?\)? sacrificed in the name of (\w+)/);
+          if (match) {
+            timelessSeed = parseInt(match[1], 10);
+            timelessConqueror = match[3];
+          }
+        }
+      }
+    }
+
+    // Extract mods
+    const mods: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Skip metadata lines
+      if (
+        line.startsWith('Rarity:') ||
+        line.startsWith('LevelReq:') ||
+        line.startsWith('Implicits:') ||
+        line.startsWith('Crafted:') ||
+        line.startsWith('Prefix:') ||
+        line.startsWith('Suffix:') ||
+        line.startsWith('Cluster Jewel') ||
+        line.startsWith('Variant:') ||
+        line.startsWith('Selected Variant:') ||
+        line.startsWith('Radius:') ||
+        line.startsWith('Limited to:') ||
+        line.startsWith('League:') ||
+        line.startsWith('<ModRange') ||
+        line.includes('{crafted}') ||
+        line.includes('{variant:') ||
+        line.includes('{range:')
+      ) {
+        continue;
+      }
+
+      // Skip item name lines
+      if (i <= 2) continue;
+
+      // This is likely a mod
+      if (line.length > 0 && !line.startsWith('Adds ') && !line.includes('Added Passive')) {
+        mods.push(line);
+      }
+    }
+
+    return {
+      id: itemId || `jewel_${Date.now()}`,
+      rarity,
+      name,
+      baseType,
+      levelRequirement,
+      isAbyssJewel,
+      isClusterJewel,
+      isTimelessJewel,
+      mods,
+      prefix,
+      suffix,
+      clusterJewelSkill,
+      clusterNodeCount,
+      clusterNotables: clusterNotables.length > 0 ? clusterNotables : undefined,
+      clusterSmallPassiveBonus,
+      clusterJewelSockets,
+      timelessType,
+      timelessConqueror,
+      timelessSeed,
+      radius,
+      variant,
+    };
+  }
+
+  /**
+   * Format jewel analysis for display
+   */
+  formatJewelAnalysis(analysis: JewelAnalysis): string {
+    let output = '=== Jewel Setup ===\n\n';
+
+    output += `Total Jewels: ${analysis.totalJewels}\n`;
+    output += `Socketed: ${analysis.socketedJewels}\n`;
+    if (analysis.unsocketedJewels > 0) {
+      output += `Unsocketed: ${analysis.unsocketedJewels}\n`;
+    }
+    output += '\n';
+
+    // Jewel type breakdown
+    output += '=== Jewel Types ===\n';
+    if (analysis.jewelsByType.regular > 0) output += `Regular: ${analysis.jewelsByType.regular}\n`;
+    if (analysis.jewelsByType.abyss > 0) output += `Abyss: ${analysis.jewelsByType.abyss}\n`;
+    if (analysis.jewelsByType.cluster > 0) output += `Cluster: ${analysis.jewelsByType.cluster}\n`;
+    if (analysis.jewelsByType.timeless > 0) output += `Timeless: ${analysis.jewelsByType.timeless}\n`;
+    if (analysis.jewelsByType.unique > 0) output += `Unique: ${analysis.jewelsByType.unique}\n`;
+    output += '\n';
+
+    // Cluster jewel breakdown
+    if (analysis.jewelsByType.cluster > 0) {
+      output += '=== Cluster Jewels ===\n';
+      if (analysis.clusterJewels.large > 0) output += `Large: ${analysis.clusterJewels.large}\n`;
+      if (analysis.clusterJewels.medium > 0) output += `Medium: ${analysis.clusterJewels.medium}\n`;
+      if (analysis.clusterJewels.small > 0) output += `Small: ${analysis.clusterJewels.small}\n`;
+
+      if (analysis.clusterJewels.notables.length > 0) {
+        output += '\nCluster Notables:\n';
+        for (const notable of analysis.clusterJewels.notables) {
+          output += `  - ${notable}\n`;
+        }
+      }
+      output += '\n';
+    }
+
+    // Individual jewels
+    output += '=== Jewel Details ===\n';
+    for (const jewel of analysis.jewels) {
+      output += `\n${jewel.name}`;
+      if (jewel.socketNodeId) {
+        output += ` [Socketed: ${jewel.socketName}]`;
+      } else {
+        output += ' [Not Socketed]';
+      }
+      output += '\n';
+
+      output += `  Base: ${jewel.baseType}\n`;
+      output += `  Rarity: ${jewel.rarity}`;
+      if (jewel.levelRequirement > 0) output += ` | Level: ${jewel.levelRequirement}`;
+      output += '\n';
+
+      // Cluster jewel info
+      if (jewel.isClusterJewel) {
+        if (jewel.clusterNodeCount) output += `  Passives: ${jewel.clusterNodeCount}\n`;
+        if (jewel.clusterJewelSockets) output += `  Jewel Sockets: ${jewel.clusterJewelSockets}\n`;
+        if (jewel.clusterSmallPassiveBonus) output += `  Small Passive: ${jewel.clusterSmallPassiveBonus}\n`;
+        if (jewel.clusterNotables && jewel.clusterNotables.length > 0) {
+          output += `  Notables: ${jewel.clusterNotables.join(', ')}\n`;
+        }
+      }
+
+      // Timeless jewel info
+      if (jewel.isTimelessJewel) {
+        if (jewel.timelessConqueror) output += `  Conqueror: ${jewel.timelessConqueror}\n`;
+        if (jewel.timelessSeed) output += `  Seed: ${jewel.timelessSeed}\n`;
+        if (jewel.radius) output += `  Radius: ${jewel.radius}\n`;
+      }
+
+      // Regular jewel prefix/suffix
+      if (jewel.prefix) output += `  Prefix: ${jewel.prefix}\n`;
+      if (jewel.suffix) output += `  Suffix: ${jewel.suffix}\n`;
+
+      if (jewel.mods.length > 0) {
+        output += '  Mods:\n';
+        for (const mod of jewel.mods) {
+          output += `    - ${mod}\n`;
+        }
+      }
+    }
+
+    // Warnings
+    if (analysis.warnings.length > 0) {
+      output += '\n=== Warnings ===\n';
+      for (const warning of analysis.warnings) {
+        output += `⚠️  ${warning}\n`;
+      }
+    }
+
+    // Recommendations
+    if (analysis.recommendations.length > 0) {
+      output += '\n=== Recommendations ===\n';
+      for (const rec of analysis.recommendations) {
+        output += `💡 ${rec}\n`;
+      }
+    }
+
+    return output;
+  }
+}
