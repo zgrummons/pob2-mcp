@@ -48,6 +48,23 @@ function parseTags(tagString?: string): Set<string> {
   );
 }
 
+/**
+ * Full, authoritative tag set for a gem: the engine's boolean `tagKeys` (which
+ * include the primary delivery tag like attack/spell that `tagString` omits)
+ * unioned with the human-facing `tags` string. Used for gating membership tests.
+ */
+function effectiveTagSet(gem: { tags?: string; tagKeys?: string[] }): Set<string> {
+  const s = new Set<string>();
+  for (const t of gem.tagKeys || []) s.add(String(t).toLowerCase());
+  for (const t of parseTags(gem.tags)) s.add(t);
+  return s;
+}
+
+/** Human-facing descriptive tags (from tagString), excluding gating + 'support'. */
+function descriptiveTags(gem: { tags?: string }): string[] {
+  return [...parseTags(gem.tags)].filter((t) => !GATING_TAGS.has(t) && t !== "support");
+}
+
 function gatingOf(tags: Set<string>): Set<string> {
   const out = new Set<string>();
   for (const t of tags) if (GATING_TAGS.has(t)) out.add(t);
@@ -60,28 +77,36 @@ export interface SupportCompat {
   compatibility: Compatibility;
   reason: string;
   sharedDescriptiveTags: string[];
+  matchedGating: string[]; // delivery tags the support shares with the skill (attack/melee/…)
 }
 
 /**
- * Decide whether a support's tags are compatible with an active skill's tags.
+ * Decide whether a support gem is compatible with an active skill.
+ * `skillTags` must be the skill's FULL (effective) tag set so gating tags like
+ * attack/spell — which the support carries but the skill's tagString omits — are
+ * matched correctly. `support` provides both its effective tags (gating) and its
+ * tagString (clean descriptive tags for relevance ranking).
  * `universal` = support has no gating tags (applies broadly).
  */
-export function supportCompatibility(skillTags: Set<string>, supportTags: Set<string>): SupportCompat {
-  const supportGating = gatingOf(supportTags);
-  const descriptive = [...supportTags].filter((t) => !GATING_TAGS.has(t) && t !== "support");
-  const shared = descriptive.filter((t) => skillTags.has(t));
+export function supportCompatibility(
+  skillTags: Set<string>,
+  support: { tags?: string; tagKeys?: string[] }
+): SupportCompat {
+  const supportGating = gatingOf(effectiveTagSet(support));
+  const shared = descriptiveTags(support).filter((t) => skillTags.has(t));
 
   if (supportGating.size === 0) {
-    return { compatibility: "universal", reason: "no delivery-tag requirement", sharedDescriptiveTags: shared };
+    return { compatibility: "universal", reason: "no delivery-tag requirement", sharedDescriptiveTags: shared, matchedGating: [] };
   }
   const met = [...supportGating].filter((t) => skillTags.has(t));
   if (met.length > 0) {
-    return { compatibility: "compatible", reason: `matches skill ${met.join("/")}`, sharedDescriptiveTags: shared };
+    return { compatibility: "compatible", reason: `matches skill ${met.join("/")}`, sharedDescriptiveTags: shared, matchedGating: met };
   }
   return {
     compatibility: "mismatch",
     reason: `requires ${[...supportGating].join("/")}, skill is not`,
     sharedDescriptiveTags: shared,
+    matchedGating: [],
   };
 }
 
@@ -124,7 +149,7 @@ export class Poe2SkillService {
     for (const g of skills.groups || []) {
       const gemList: any[] = g.gems || [];
       const activeGem = gemList.find((gm) => !gm.isSupport) || null;
-      const skillTags = parseTags(activeGem?.tags);
+      const skillTags = activeGem ? effectiveTagSet(activeGem) : new Set<string>();
 
       const issues: string[] = [];
       const supports = gemList.filter((gm) => gm.isSupport);
@@ -136,7 +161,6 @@ export class Poe2SkillService {
       }
 
       const gems: AnalyzedGem[] = gemList.map((gm) => {
-        const tags = parseTags(gm.tags);
         const base: AnalyzedGem = {
           name: gm.name,
           level: gm.level ?? 0,
@@ -147,7 +171,7 @@ export class Poe2SkillService {
           known: gm.known !== false,
         };
         if (gm.isSupport && activeGem) {
-          base.compat = supportCompatibility(skillTags, tags);
+          base.compat = supportCompatibility(skillTags, gm);
           if (base.compat.compatibility === "mismatch") {
             issues.push(`Support "${gm.name}" looks mismatched: ${base.compat.reason}.`);
           }
@@ -197,7 +221,7 @@ export class Poe2SkillService {
     if (!activeGem) {
       return { activeSkill: null, suggestions: [] };
     }
-    const skillTags = parseTags(activeGem.tags);
+    const skillTags = effectiveTagSet(activeGem);
     const used = new Set(gemList.filter((gm) => gm.isSupport).map((gm) => String(gm.name).toLowerCase()));
 
     // Pull the full support list from the engine and rank.
@@ -205,14 +229,16 @@ export class Poe2SkillService {
     const ranked = [];
     for (const sg of all.gems) {
       if (used.has(String(sg.name).toLowerCase())) continue;
-      const compat = supportCompatibility(skillTags, parseTags(sg.tags));
+      const compat = supportCompatibility(skillTags, sg);
       if (compat.compatibility === "mismatch") continue;
       ranked.push({
         name: sg.name,
         tags: sg.tags || "",
         reason: compat.compatibility === "universal" ? "applies broadly" : compat.reason,
         shared: compat.sharedDescriptiveTags,
-        score: compat.sharedDescriptiveTags.length + (compat.compatibility === "compatible" ? 1 : 0),
+        // Reward both shared damage-type tags and matched delivery tags so strong
+        // generic supports (e.g. extra-strike melee supports) aren't buried.
+        score: compat.sharedDescriptiveTags.length + compat.matchedGating.length,
       });
     }
     ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
@@ -246,7 +272,9 @@ export class Poe2SkillService {
     }
 
     const count = Math.min(opts.count || 6, 12);
-    const candidatePool = Math.min(opts.candidatePool || 16, 30);
+    // Measure a wide pool of the best tag-ranked candidates, since the tag score
+    // is only a proxy — the engine DPS delta is the real ranking.
+    const candidatePool = Math.min(opts.candidatePool || 28, 40);
     const level = opts.level || 20;
 
     // Heuristic shortlist of compatible, unused supports to measure.
