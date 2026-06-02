@@ -90,6 +90,12 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 
 > A committed integration test now covers the verified behavior:
 > `npx jest tests/integration/poe2Bridge.test.ts` (auto-skips if the PoE2 fork isn't present).
+>
+> **Inherited unit-test debt:** the copied pob-mcp unit suite has ~9 pre-existing failures in this
+> environment (e.g. `treeService` pathfinding, `contextBuilder`/`pobLuaBridge.simple` suites failing
+> to compile, and `validationService` immunity tests asserting `criticalIssues` while the code emits
+> warnings) — these pre-date the port and are unrelated to PoE2 changes. Only the one validation test
+> invalidated by the PoE2 life-threshold retune was updated. Cleaning up the rest is a separate task.
 
 ## Status
 

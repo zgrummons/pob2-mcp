@@ -38,7 +38,7 @@ describe('ValidationService', () => {
             { stat: 'FireResist', value: '75' },
             { stat: 'ColdResist', value: '75' },
             { stat: 'LightningResist', value: '75' },
-            { stat: 'Life', value: '3000' }, // Too low for level 90
+            { stat: 'Life', value: '1500' }, // Too low for level 90 (PoE2 target: 3000)
             { stat: 'EnergyShield', value: '0' },
           ],
         },
@@ -47,8 +47,9 @@ describe('ValidationService', () => {
       const validation = validationService.validateBuild(build, null);
       const lifeIssue = validation.criticalIssues.find(i => i.title.includes('Life Pool'));
       expect(lifeIssue).toBeDefined();
-      expect(lifeIssue?.currentValue).toBe(3000);
-      expect(lifeIssue?.recommendedValue).toBe(5500);
+      expect(lifeIssue?.currentValue).toBe(1500);
+      // PoE2-retuned threshold (was 5500 in PoE1)
+      expect(lifeIssue?.recommendedValue).toBe(3000);
     });
 
     it('should detect ES builds correctly', () => {
