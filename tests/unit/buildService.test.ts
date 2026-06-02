@@ -779,6 +779,53 @@ Grants Immunity to Freeze and Chill for 5 seconds if used while Frozen`,
       expect(flasks?.hasFreezeImmunity).toBe(true);
     });
 
+    it('should detect PoE2 charm-based ailment immunity', () => {
+      const build = {
+        Items: {
+          ItemSet: {
+            Slot: [
+              { name: 'Flask 1', Item: 'Rarity: MAGIC\nLife Flask\nLife Flask' },
+              {
+                name: 'Charm 1',
+                Item: `Rarity: MAGIC
+Thawing Charm
+Thawing Charm
+Used when you become Frozen`,
+              },
+              {
+                name: 'Charm 2',
+                Item: `Rarity: MAGIC
+Staunching Charm
+Staunching Charm
+Used when you start Bleeding`,
+              },
+            ],
+          },
+        },
+      };
+
+      const flasks = buildService.parseFlasks(build);
+      expect(flasks).not.toBeNull();
+      expect(flasks?.hasFreezeImmunity).toBe(true);
+      expect(flasks?.hasBleedImmunity).toBe(true);
+      // flask present, charms present → no "no charms" warning
+      expect(flasks?.warnings.some(w => w.includes('No charms'))).toBe(false);
+    });
+
+    it('should warn when no charms are equipped (PoE2)', () => {
+      const build = {
+        Items: {
+          ItemSet: {
+            Slot: [
+              { name: 'Flask 1', Item: 'Rarity: MAGIC\nLife Flask\nLife Flask' },
+            ],
+          },
+        },
+      };
+      const flasks = buildService.parseFlasks(build);
+      expect(flasks?.warnings.some(w => w.includes('No charms'))).toBe(true);
+    });
+
     it('should detect corrupted blood immunity', () => {
       const build = {
         Items: {
@@ -822,20 +869,20 @@ Quality: 20`,
       expect(flasks?.flasks[0].isUnique).toBe(true);
     });
 
-    it('should warn about missing flask slots', () => {
+    it('should warn about an empty flask slot (PoE2)', () => {
       const build = {
         Items: {
           ItemSet: {
             Slot: [
               { name: 'Flask 1', Item: 'Rarity: MAGIC\nLife Flask\nLife Flask' },
-              { name: 'Flask 2', Item: 'Rarity: MAGIC\nQuicksilver Flask\nQuicksilver Flask' },
+              { name: 'Flask 2' }, // empty slot, no item
             ],
           },
         },
       };
 
       const flasks = buildService.parseFlasks(build);
-      expect(flasks?.warnings).toContain('Only 2/5 flask slots filled');
+      expect(flasks?.warnings.some(w => w.includes('flask slot(s) empty'))).toBe(true);
     });
 
     it('should warn about no life flask', () => {

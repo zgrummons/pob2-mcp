@@ -461,12 +461,16 @@ export class BuildService {
       ? build.Items.ItemSet.Slot
       : [build.Items.ItemSet.Slot];
 
-    // Find flask slots (Flask 1-5)
+    // PoE2 has Flask slots (Life/Mana) and separate Charm slots. Ailment
+    // immunity/removal in PoE2 comes from charms, not flask suffixes.
     const flaskSlots = slots.filter(slot =>
       slot.name && slot.name.startsWith('Flask ')
     );
+    const charmSlots = slots.filter(slot =>
+      slot.name && slot.name.startsWith('Charm ')
+    );
 
-    if (flaskSlots.length === 0) {
+    if (flaskSlots.length === 0 && charmSlots.length === 0) {
       return null;
     }
 
@@ -537,24 +541,52 @@ export class BuildService {
       }
     }
 
+    // Parse charm slots for PoE2 ailment immunity/removal.
+    let charmCount = 0;
+    for (const slot of charmSlots) {
+      if (!slot.name) continue;
+      let itemText = slot.Item;
+      if (!itemText && slot.itemId) {
+        itemText = itemMap.get(slot.itemId);
+      }
+      if (!itemText) continue;
+      charmCount++;
+
+      const text = itemText.toLowerCase();
+      // PoE2 charm names/mods: Thawing (freeze), Staunching (bleed),
+      // Antidote (poison), Grounding (shock), Dousing (ignite), Stone (stun)...
+      if (text.includes('bleed') || text.includes('staunch')) hasBleedImmunity = true;
+      if (text.includes('freeze') || text.includes('thaw') || text.includes('chill')) hasFreezeImmunity = true;
+      if (text.includes('poison') || text.includes('antidote')) hasPoisonImmunity = true;
+      if (text.includes('curse')) hasCurseImmunity = true;
+
+      // Track unique charms alongside unique flasks (both are equippable uniques)
+      const firstLine = itemText.split('\n').find(l => l.trim()) || '';
+      if (text.includes('rarity: unique') && firstLine) {
+        uniqueFlasks.push(firstLine.trim());
+      }
+    }
+
     // Generate warnings and recommendations
     const warnings: string[] = [];
     const recommendations: string[] = [];
 
     if (flasks.length === 0) {
       warnings.push('No flasks equipped');
+    } else if (flaskSlots.length > 0 && flasks.length < flaskSlots.length) {
+      warnings.push(`${flaskSlots.length - flasks.length} of ${flaskSlots.length} flask slot(s) empty`);
     }
 
-    if (flasks.length < 5) {
-      warnings.push(`Only ${flasks.length}/5 flask slots filled`);
+    if (charmCount === 0) {
+      warnings.push('No charms equipped — charms provide ailment removal/immunity in PoE2');
     }
 
     if (!hasBleedImmunity) {
-      recommendations.push('Add bleed immunity (common: "of Staunching" suffix on life flask)');
+      recommendations.push('Add bleed handling via a Staunching Charm');
     }
 
     if (!hasFreezeImmunity) {
-      recommendations.push('Add freeze immunity (common: "of Heat" suffix or flask with chill/freeze immunity)');
+      recommendations.push('Add freeze handling via a Thawing Charm');
     }
 
     if (flaskTypes.life === 0 && flaskTypes.hybrid === 0) {

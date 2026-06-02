@@ -9,9 +9,10 @@ export interface BuildGoalsHandlerContext {
 
 const ISSUES_FIELDS = [
   'Life', 'LifeUnreserved', 'EnergyShield', 'Mana', 'ManaUnreserved',
+  // PoE2 reservation resource
+  'Spirit', 'SpiritUnreserved',
   'FireResist', 'ColdResist', 'LightningResist', 'ChaosResist',
   'FireResistOverCap', 'ColdResistOverCap', 'LightningResistOverCap',
-  'SpellSuppressionChance', 'EffectiveSpellSuppressionChance',
   // DPS fields needed by handleGetPassiveUpgrades for baseDPS scoring
   'TotalDPS', 'CombinedDPS', 'MinionTotalDPS',
   // EHP field needed by handleGetPassiveUpgrades for baseEHP scoring
@@ -73,6 +74,13 @@ export async function handleGetBuildIssues(context: BuildGoalsHandlerContext) {
     const manaUnreserved = (stats.ManaUnreserved as number) ?? 0;
     if (manaUnreserved < 0) {
       issues.push({ severity: 'error', category: 'reservation', message: `Mana over-reserved by ${Math.abs(manaUnreserved)}` });
+    }
+
+    // Spirit reservation (PoE2): persistent buffs/auras reserve Spirit.
+    const spirit = (stats.Spirit as number) ?? 0;
+    const spiritUnreserved = (stats.SpiritUnreserved as number);
+    if (spirit > 0 && spiritUnreserved !== undefined && spiritUnreserved < 0) {
+      issues.push({ severity: 'error', category: 'reservation', message: `Spirit over-reserved by ${Math.abs(spiritUnreserved)} (reduce reserved skills or raise Spirit)` });
     }
 
     // Zero DPS check
