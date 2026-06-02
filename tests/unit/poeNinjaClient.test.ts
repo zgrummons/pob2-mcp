@@ -1,17 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { PoeNinjaClient } from '../../src/services/poeNinjaClient';
 
-// PoE2 poe.ninja currency-exchange overview shape (lines + items joined by id).
+// PoE2 poe.ninja exchange/current/overview shape (lines + items joined by id).
+// Base unit is the Exalted Orb (primaryValue=1); values are Exalted-equivalents.
 const POE2_RESPONSE = {
-  core: { version: '1', timestamp: 1700000000 },
+  core: { rates: { chaos: 0.781 } },
   lines: [
-    { id: 'exalted', primaryValue: 0.5, volumePrimaryValue: 1920 },
-    { id: 'divine', primaryValue: 120, volumePrimaryValue: 300 },
+    { id: 'exalted', primaryValue: 1, volumePrimaryValue: 3445250 },
+    { id: 'divine', primaryValue: 77, volumePrimaryValue: 9000 },
+    { id: 'alch', primaryValue: 1.21, volumePrimaryValue: 37059 },
     { id: 'zero', primaryValue: 0 }, // dropped (no value)
   ],
   items: [
-    { id: 'exalted', name: 'Exalted Orb', tradeId: 'exalted' },
-    { id: 'divine', name: 'Divine Orb', tradeId: 'divine' },
+    { id: 'exalted', name: 'Exalted Orb', detailsId: 'exalted-orb' },
+    { id: 'divine', name: 'Divine Orb', detailsId: 'divine-orb' },
+    { id: 'alch', name: 'Orb of Alchemy', detailsId: 'orb-of-alchemy' },
     { id: 'zero', name: 'Zero Orb' },
   ],
 };
@@ -33,33 +36,33 @@ describe('PoeNinjaClient (PoE2)', () => {
     jest.restoreAllMocks();
   });
 
-  it('calls the PoE2 currencyexchange endpoint with leagueName/overviewName', async () => {
-    await client.getCurrencyRates('Standard');
+  it('calls the PoE2 exchange/current endpoint with league/type', async () => {
+    await client.getCurrencyRates('Runes of Aldur');
     const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toContain('poe.ninja/poe2/api/economy/currencyexchange/overview');
-    expect(url).toContain('leagueName=Standard');
-    expect(url).toContain('overviewName=Currency');
+    expect(url).toContain('poe.ninja/poe2/api/economy/exchange/current/overview');
+    expect(url).toContain('league=Runes%20of%20Aldur');
+    expect(url).toContain('type=Currency');
   });
 
   it('transforms PoE2 lines+items into CurrencyOverview', async () => {
     const overview = await client.getCurrencyRates('Standard');
-    const exalted = overview.lines.find((l) => l.currencyTypeName === 'Exalted Orb');
-    expect(exalted?.chaosEquivalent).toBe(0.5);
+    const divine = overview.lines.find((l) => l.currencyTypeName === 'Divine Orb');
+    expect(divine?.chaosEquivalent).toBe(77);
     // zero-value entries are dropped
     expect(overview.lines.find((l) => l.currencyTypeName === 'Zero Orb')).toBeUndefined();
   });
 
-  it('builds an exchange map with Chaos Orb base = 1', async () => {
+  it('builds an exchange map with Exalted Orb base = 1 (PoE2)', async () => {
     const map = await client.getCurrencyExchangeMap('Standard');
-    expect(map.get('Chaos Orb')).toBe(1.0);
-    expect(map.get('Divine Orb')).toBe(120);
-    expect(map.get('Exalted Orb')).toBe(0.5);
+    expect(map.get('Exalted Orb')).toBe(1.0);
+    expect(map.get('Divine Orb')).toBe(77);
+    expect(map.get('Orb of Alchemy')).toBe(1.21);
   });
 
   it('converts a trading chain using the rate map', async () => {
     const map = await client.getCurrencyExchangeMap('Standard');
-    // 2 Divine -> chaos -> Exalted: 2*120 / 0.5 = 480 Exalted
-    const exaltedFromDivine = (2 * map.get('Divine Orb')!) / map.get('Exalted Orb')!;
-    expect(exaltedFromDivine).toBe(480);
+    // 1 Divine -> exalted -> Alchemy: 1*77 / 1.21 ≈ 63.6 Alchemy
+    const alchFromDivine = (1 * map.get('Divine Orb')!) / map.get('Orb of Alchemy')!;
+    expect(alchFromDivine).toBeCloseTo(63.64, 1);
   });
 });

@@ -95,15 +95,19 @@ interface Poe2ExchangeOverview {
 /**
  * Client for fetching data from the poe.ninja PoE2 economy API.
  *
- * PoE2 endpoint: /poe2/api/economy/currencyexchange/overview?leagueName=..&overviewName=Currency
- * Response shape differs from PoE1 ({lines:[{id,primaryValue}], items:[{id,name}]}), so we
- * transform it into the existing CurrencyOverview shape used by the handlers.
+ * PoE2 endpoint: /poe2/api/economy/exchange/current/overview?league=<League>&type=Currency
+ * Response: { core, lines:[{id, primaryValue, ...}], items:[{id, name, ...}] }.
+ * We join lines+items by id and transform into the CurrencyOverview shape the handlers use.
  *
- * Note: the currency-exchange feed exposes a single value per currency (no bid/ask spread),
- * so arbitrage round-trips evaluate to ~0% — find_arbitrage will typically return nothing.
+ * IMPORTANT: in PoE2 the base unit is the **Exalted Orb** (Exalted has primaryValue=1), not
+ * Chaos. `primaryValue` is therefore an Exalted-equivalent value; `CurrencyRate.chaosEquivalent`
+ * here holds that Exalted-equivalent (legacy field name). `core.rates` carries conversion factors.
+ *
+ * Note: this feed exposes a single value per currency (no bid/ask spread), so arbitrage
+ * round-trips evaluate to ~0% — find_arbitrage will typically return nothing.
  */
 export class PoeNinjaClient {
-  private baseUrl = 'https://poe.ninja/poe2/api/economy/currencyexchange';
+  private baseUrl = 'https://poe.ninja/poe2/api/economy/exchange/current';
   private cache = new Map<string, { data: any; timestamp: number }>();
   private cacheTTL = 300000; // 5 minutes
 
@@ -141,7 +145,7 @@ export class PoeNinjaClient {
       return cached;
     }
 
-    const url = `${this.baseUrl}/overview?leagueName=${encodeURIComponent(league)}&overviewName=Currency`;
+    const url = `${this.baseUrl}/overview?league=${encodeURIComponent(league)}&type=Currency`;
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'pob2-mcp-server/0.1',
@@ -167,12 +171,13 @@ export class PoeNinjaClient {
   }
 
   /**
-   * Build a currency exchange rate map (all rates in chaos equivalent)
+   * Build a currency exchange rate map. Values are Exalted-Orb equivalents
+   * (PoE2 base currency); the Exalted Orb itself is 1.0.
    */
   async getCurrencyExchangeMap(league: string): Promise<Map<string, number>> {
     const data = await this.getCurrencyRates(league);
     const rateMap = new Map<string, number>();
-    rateMap.set('Chaos Orb', 1.0);
+    rateMap.set('Exalted Orb', 1.0);
     for (const line of data.lines) {
       if (line.currencyTypeName && line.chaosEquivalent > 0) {
         rateMap.set(line.currencyTypeName, line.chaosEquivalent);

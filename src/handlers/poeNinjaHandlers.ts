@@ -25,47 +25,47 @@ export async function handleGetCurrencyRates(
     const rateMap = await context.ninjaClient.getCurrencyExchangeMap(league);
 
     let output = `IMPORTANT: Show the user ALL of the following information verbatim, including:\n`;
-    output += `- All currency names and their chaos values\n`;
+    output += `- All currency names and their Exalted-equivalent values\n`;
     output += `- The complete table of exchange rates\n`;
     output += `DO NOT summarize or paraphrase this output. Present it exactly as written below.\n\n`;
-    output += `=== Currency Exchange Rates ===\n`;
+    output += `=== Currency Exchange Rates (PoE2) ===\n`;
     output += `League: ${league}\n`;
     output += `Last Updated: ${new Date().toISOString()}\n\n`;
 
     // Sort by value descending
     const sorted = Array.from(rateMap.entries()).sort((a, b) => b[1] - a[1]);
 
-    // Group by value ranges
-    const high = sorted.filter(([_, val]) => val >= 100);
-    const medium = sorted.filter(([_, val]) => val >= 1 && val < 100);
+    // Group by value ranges (in Exalted Orb equivalent)
+    const high = sorted.filter(([_, val]) => val >= 10);
+    const medium = sorted.filter(([_, val]) => val >= 1 && val < 10);
     const low = sorted.filter(([_, val]) => val < 1);
 
     if (high.length > 0) {
-      output += `High Value (≥100 chaos):\n`;
+      output += `High Value (≥10 ex):\n`;
       for (const [currency, rate] of high) {
-        output += `  ${currency.padEnd(30)} ${rate.toFixed(2)} chaos\n`;
+        output += `  ${currency.padEnd(30)} ${rate.toFixed(2)} ex\n`;
       }
       output += `\n`;
     }
 
     if (medium.length > 0) {
-      output += `Medium Value (1-99 chaos):\n`;
+      output += `Medium Value (1-10 ex):\n`;
       for (const [currency, rate] of medium) {
-        output += `  ${currency.padEnd(30)} ${rate.toFixed(2)} chaos\n`;
+        output += `  ${currency.padEnd(30)} ${rate.toFixed(2)} ex\n`;
       }
       output += `\n`;
     }
 
     if (low.length > 0) {
-      output += `Low Value (<1 chaos):\n`;
+      output += `Low Value (<1 ex):\n`;
       for (const [currency, rate] of low) {
-        output += `  ${currency.padEnd(30)} ${rate.toFixed(4)} chaos\n`;
+        output += `  ${currency.padEnd(30)} ${rate.toFixed(4)} ex\n`;
       }
       output += `\n`;
     }
 
     output += `\nTotal Currencies: ${rateMap.size}\n`;
-    output += `\nNote: Rates are from poe.ninja and update hourly. All values shown in Chaos Orb equivalent.\n`;
+    output += `\nNote: Rates are from poe.ninja (PoE2) and update periodically. All values shown in Exalted Orb equivalent.\n`;
 
     return {
       content: [
@@ -225,13 +225,13 @@ export async function handleCalculateTradingProfit(
         break;
       }
 
-      // Convert to chaos, then to target currency
-      const chaosValue = currentAmount * fromRate;
-      const newAmount = chaosValue / toRate;
+      // Convert to the base (Exalted), then to target currency
+      const baseValue = currentAmount * fromRate;
+      const newAmount = baseValue / toRate;
 
       output += `${i}. ${currentCurrency} → ${toCurrency}\n`;
-      output += `   ${currentAmount.toFixed(4)} ${currentCurrency} × ${fromRate.toFixed(4)} = ${chaosValue.toFixed(4)} chaos\n`;
-      output += `   ${chaosValue.toFixed(4)} chaos ÷ ${toRate.toFixed(4)} = ${newAmount.toFixed(4)} ${toCurrency}\n\n`;
+      output += `   ${currentAmount.toFixed(4)} ${currentCurrency} × ${fromRate.toFixed(4)} = ${baseValue.toFixed(4)} ex\n`;
+      output += `   ${baseValue.toFixed(4)} ex ÷ ${toRate.toFixed(4)} = ${newAmount.toFixed(4)} ${toCurrency}\n\n`;
 
       currentAmount = newAmount;
       currentCurrency = toCurrency;

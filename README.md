@@ -347,12 +347,14 @@ Snapshots are stored in `POB_DIRECTORY/.pob-mcp/snapshots/`.
 
 | Tool | Description |
 |---|---|
-| `get_currency_rates` | Live PoE2 currency exchange rates (Chaos Orb equivalent) |
+| `get_currency_rates` | Live PoE2 currency exchange rates (Exalted Orb equivalent) |
 | `find_arbitrage` | Detect profitable currency trading loops (see note) |
 | `calculate_trading_profit` | Evaluate a specific trading chain |
 
-Sourced from the **PoE2** poe.ninja economy endpoint (`/poe2/api/economy/currencyexchange`), cached 5 min.
-Pass the **exact**, case-sensitive PoE2 league name (e.g., `Standard`, `Rise of the Abyssal`).
+Sourced from the **PoE2** poe.ninja economy endpoint
+(`/poe2/api/economy/exchange/current/overview?league=<League>&type=Currency`), cached 5 min.
+**Live-verified.** Pass the **exact**, case-sensitive PoE2 league name (e.g., `Runes of Aldur`, `Standard`).
+Values are in **Exalted Orb** equivalent (PoE2's base currency), not Chaos.
 
 > **Note:** the PoE2 currency-exchange feed exposes a single value per currency (no separate buy/sell
 > spread), so `find_arbitrage` generally returns nothing — round-trips evaluate to ~0% profit.
