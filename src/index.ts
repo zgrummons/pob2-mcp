@@ -291,8 +291,15 @@ class PoBMCPServer {
       // Add export and persistence tools
       tools.push(...getExportToolSchemas());
 
-      // Add skill gem analysis tools
-      tools.push(...getSkillGemToolSchemas());
+      // Legacy PoE1 skill-gem tools (analyze_skill_links, suggest_support_gems,
+      // validate_gem_quality, compare_gem_setups, find_optimal_links,
+      // gem_upgrade_path) are NOT registered for PoE2: they rely on a hand-coded
+      // PoE1 gem DB / archetype templates / 6-link & Awakened-gem assumptions.
+      // The engine-backed analyze_skills / suggest_supports / list_gems tools
+      // supersede them. Set POB_LEGACY_GEM_TOOLS=true to expose them anyway.
+      if (process.env.POB_LEGACY_GEM_TOOLS === 'true') {
+        tools.push(...getSkillGemToolSchemas());
+      }
 
       // Add Trade API tools if enabled
       if (this.tradeClient) {

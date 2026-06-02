@@ -88,14 +88,11 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 `POB_LUA_ENABLED=true`, `POB_FORK_PATH=…/PathOfBuilding-PoE2/src`, `POB_CMD=luajit`,
 `POB_DIRECTORY=<your PoB2 Builds>`, `POB_TIMEOUT_MS=30000`.
 
-> A committed integration test now covers the verified behavior:
-> `npx jest tests/integration/poe2Bridge.test.ts` (auto-skips if the PoE2 fork isn't present).
->
-> **Inherited unit-test debt:** the copied pob-mcp unit suite has ~9 pre-existing failures in this
-> environment (e.g. `treeService` pathfinding, `contextBuilder`/`pobLuaBridge.simple` suites failing
-> to compile, and `validationService` immunity tests asserting `criticalIssues` while the code emits
-> warnings) — these pre-date the port and are unrelated to PoE2 changes. Only the one validation test
-> invalidated by the PoE2 life-threshold retune was updated. Cleaning up the rest is a separate task.
+> **Full suite is green:** `npx jest` → 14 suites / 251 tests pass, including the env-gated PoE2
+> bridge integration suite (`tests/integration/poe2Bridge.test.ts`, auto-skips without the fork).
+> The previously-inherited pob-mcp unit-test failures (stale `useTcpMode`/`PoBLuaTcpClient` refs,
+> evolved context shapes, wrong mock response keys, PoE1 fixture shapes, immunity critical-vs-warning)
+> have all been fixed.
 
 ## Status
 
@@ -126,26 +123,33 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   get_classes, analyze/suggest).
 - **Market tools gated** — `poe.ninja` tools now hidden unless `POE_NINJA_ENABLED=true`; Trade behind
   `POE_TRADE_ENABLED`. Both labelled PoE1-endpoints / unverified-for-PoE2 in the README.
+- **Defensive analyzer retuned for PoE2** (`defensiveAnalyzer.ts` + `validateDefensiveLayers`):
+  avoidance now uses `EvadeChance` / block / spell block / `DeflectChance` (no spell suppression or
+  passive dodge); PoE1 aura/keystone advice (Grace/Determination/Acrobatics/Vitality/Wicked Ward) removed.
+- **Legacy PoE1 gem tools deregistered** — `analyze_skill_links`, `suggest_support_gems`,
+  `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path` are no longer
+  exposed unless `POB_LEGACY_GEM_TOOLS=true`. The engine-backed tools supersede them.
+- **Full unit + integration suite green** (251 tests).
 
 ### Carried over from PoE1 — needs PoE2 review
-- **Legacy skill-gem tools** (`skillGemService.ts`, ~936 lines + `skillGemHandlers.ts`): hand-coded
-  PoE1 gem DB, archetype templates, 6-link assumption. **Superseded for analysis/suggestions by
-  `analyze_skills` / `suggest_supports` above** — prefer those. Still-PoE1 and not yet ported:
-  `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path`
-  (and the old `analyze_skill_links` / `suggest_support_gems`, which remain registered).
-- Defensive analyzer thresholds.
 - `poe.ninja` + Trade API — PoE1 leagues/URLs; **gated off by default**, not ported to PoE2 endpoints.
+- Legacy skill-gem tools (`skillGemService.ts`) — still PoE1 internally; **deregistered by default**.
+  Reimplement on engine data or delete the dead code if never re-enabling.
 - `clusterJewelHandlers` (non-MVP) — PoE1 cluster jewel model + needs the `PathOfBuilding2` fix.
+- `analyze_build` / `validate_build` — deeper pass on real imported PoE2 build codes (charms, weapon
+  swap, Spirit reservation) beyond stat-level validation.
 
 ## Recommended next steps (in order)
 
-1. Port or retire the remaining legacy gem tools (`validate_gem_quality`, `compare_gem_setups`,
-   `find_optimal_links`, `gem_upgrade_path`) — fold useful ones onto the engine-backed pair.
-2. Defensive analyzer (`defensiveAnalyzer.ts`) — review thresholds/keystone names for PoE2.
-3. If PoE2 market data is wanted: implement PoE2 `poe.ninja`/`trade2` endpoints behind the existing
+1. `analyze_build` / `validate_build` deeper pass on real imported PoE2 build codes (charms, weapon
+   swap, Spirit reservation) beyond the current stat-level validation — get a real PoE2 build code to
+   exercise the full XML path.
+2. If PoE2 market data is wanted: implement PoE2 `poe.ninja`/`trade2` endpoints behind the existing
    flags (needs network; verify against live PoE2 economy/trade).
-4. `analyze_build` / `validate_build` deeper pass on real imported PoE2 build codes (charms, weapon
-   swap, Spirit reservation) beyond the current stat-level validation.
+3. Delete the dead `skillGemService.ts` / `skillGemHandlers.ts` (and PoE1 schemas) if the legacy gem
+   tools will never be re-enabled — currently deregistered but still compiled.
+4. Validate the PoE2 life/defensive thresholds against real endgame builds (current numbers are
+   reasoned estimates).
 
 ## Memory
 

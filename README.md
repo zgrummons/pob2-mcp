@@ -12,7 +12,9 @@ It is a port of [`pob-mcp`](../pob-mcp) (PoE1) to PoE2. The high-fidelity calcul
 >
 > **PoE2-native additions:** `list_gems` queries Path of Building's own PoE2 gem database (skill + support gems, tags, gem family, requirements, max level) — use it for accurate gem info instead of the legacy heuristics below.
 >
-> **Carried over from PoE1 — needs PoE2 review before relying on it:** the heuristic skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, etc.) still use a hand-maintained PoE1 gem DB / archetype templates and a 6-link assumption that does not match PoE2 (uncut skills + per-skill support sockets); prefer `list_gems` + the engine's own validation. Also: defensive analyzer thresholds, class/ascendancy ID tables in some tool descriptions, `poe.ninja` and Trade API endpoints (PoE1 leagues/URLs), bandit/pantheon config (does not exist in PoE2). The validation tool's life thresholds and suggestions have been retuned for PoE2. These tools still compile and run but may return PoE1-shaped assumptions.
+> **Engine-backed PoE2 tools to prefer:** `analyze_skills`, `suggest_supports` (incl. `measure_dps`), `list_gems`, `get_classes` — all sourced from the PoB2 engine. The defensive analyzer and `validate_build` have been retuned for PoE2 mechanics (evade/block/deflect, Spirit, charms; no spell suppression).
+>
+> **Disabled by default (PoE1-shaped, opt-in):** the legacy skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, `validate_gem_quality`, `compare_gem_setups`, `gem_upgrade_path`) — `POB_LEGACY_GEM_TOOLS=true`; `poe.ninja` — `POE_NINJA_ENABLED=true`; Trade API — `POE_TRADE_ENABLED=true`. These carry PoE1 gem/league/endpoint assumptions. Class/ascendancy ID tables in some descriptions and bandit/pantheon config (absent in PoE2) are also PoE1 remnants.
 >
 > **PoE2 engine differences already handled in the bridge:** `PassiveSpec:ImportFromNodeList` signature (extra `className` / `weaponSets` params), generic config passthrough (no bandit/pantheon), flask-slot validation against the actual item set, `Spirit` in default stat export, and stdout reserved for the JSON protocol (PoB logging redirected to stderr).
 
@@ -145,6 +147,7 @@ npm run build
 | `POB_TIMEOUT_MS` | `10000` | Lua request timeout (ms) |
 | `POE_TRADE_ENABLED` | `false` | Enable Trade API tools (⚠️ PoE1 endpoints — unverified for PoE2) |
 | `POE_NINJA_ENABLED` | `false` | Expose poe.ninja tools (⚠️ PoE1 endpoints/leagues — unverified for PoE2; off by default) |
+| `POB_LEGACY_GEM_TOOLS` | `false` | Expose the legacy PoE1 skill-gem tools (⚠️ PoE1 gem model; prefer the engine-backed gem tools) |
 
 ### Setting Up the Lua Bridge
 
@@ -304,18 +307,21 @@ A build with all 3 layers is considered exceptional.
 
 Returns critical issues, warnings, and info with actionable suggestions and an overall 0–10 health score. Uses Lua bridge stats when available; falls back to XML parsing. `build_name` is optional — omitting it validates the currently loaded Lua bridge build.
 
-### Skill Gem Analysis
+### Skill Gem Analysis (PoE2, engine-backed — preferred)
 
 | Tool | Description |
 |---|---|
-| `analyze_skill_links` | Evaluate support gems and detect build archetype |
-| `suggest_support_gems` | Ranked support gem recommendations with DPS estimates |
-| `validate_gem_quality` | Find gems needing quality, awakened upgrades, or corruption |
-| `compare_gem_setups` | Side-by-side structural comparison of gem configurations |
-| `find_optimal_links` | Auto-generate best support combo for a 4/5/6-link and budget |
-| `gem_upgrade_path` | Show upgrade path for a gem (awakened, quality variants) |
+| `analyze_skills` | Engine-truth breakdown of each socket group: active skill + supports, flags tag-mismatched supports, empty/disabled/unknown gems |
+| `suggest_supports` | Compatible supports for a group's active skill from PoB2's gem DB; ranked by tag relevance, or by **real measured DPS** with `measure_dps=true` |
+| `list_gems` | Query PoB2's authoritative gem database (active/support, tags, family, requirements, max level) |
+| `get_classes` | PoE2 classes + ascendancy IDs from the engine |
 
-**Budget tiers**: `league_start`, `mid_league`, `endgame`
+#### Legacy PoE1 gem tools (not registered by default)
+
+`analyze_skill_links`, `suggest_support_gems`, `validate_gem_quality`, `compare_gem_setups`,
+`find_optimal_links`, `gem_upgrade_path` use a hand-coded PoE1 gem DB / archetype templates and a
+6-link + Awakened-gem model that does not match PoE2. They are **disabled by default**; set
+`POB_LEGACY_GEM_TOOLS=true` to expose them. Prefer the engine-backed tools above.
 
 ### Build Export & Persistence
 
