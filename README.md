@@ -235,9 +235,9 @@ The server registers **91 tools** across 10 categories.
 | `select_item_set` | Switch active item set |
 | `plan_leveling` | Generate a leveling plan for a build |
 
-**`lua_set_tree` class IDs**: 0=Scion, 1=Marauder, 2=Ranger, 3=Witch, 4=Duelist, 5=Templar, 6=Shadow
+**`lua_set_tree` class IDs (PoE2)**: 1=Witch, 2=Ranger, 6=Warrior, 7=Sorceress, 8=Huntress, 9=Mercenary, 10=Monk, 11=Druid. Call `get_classes` for the live list (classes/ascendancies can change between PoE2 patches).
 
-**Witch ascendancy IDs**: 1=Occultist, 2=Elementalist, 3=Necromancer
+**Ascendancy IDs (PoE2)** — per class, e.g. Witch: 1=Infernalist, 2=Blood Mage, 3=Lich, 4=Abyssal Lich; Monk: 1=Martial Artist, 2=Invoker, 3=Acolyte of Chayula. Use `get_classes` for the full, current mapping.
 
 **`lua_save_build` is required** before using file-based tools (`validate_build`, `analyze_build`, etc.) on an in-memory build.
 

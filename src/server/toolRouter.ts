@@ -17,7 +17,7 @@ import { handleListBuilds, handleAnalyzeBuild, handleCompareBuilds, handleGetBui
 import { handleStartWatching, handleStopWatching, handleGetRecentChanges, handleWatchStatus, handleRefreshTreeData } from "../handlers/watchHandlers.js";
 import { handleCompareTrees, handleGetNearbyNodes, handleFindPath, handleGetPassiveUpgrades, handleSuggestMasteries } from "../handlers/treeHandlers.js";
 import { handleGetBuildIssues, formatIssuesResponse } from "../handlers/buildGoalsHandlers.js";
-import { handleLuaStart, handleLuaStop, handleLuaNewBuild, handleLuaSaveBuild, handleLuaLoadBuild, handleLuaGetStats, handleLuaGetTree, handleLuaSetTree, handleSearchTreeNodes, handleListGems, handleLuaGetBuildInfo, handleLuaReloadBuild, handleUpdateTreeDelta, handleCreateSpec, handleListSpecs, handleSelectSpec, handleDeleteSpec, handleRenameSpec, handleListItemSets, handleSelectItemSet } from "../handlers/luaHandlers.js";
+import { handleLuaStart, handleLuaStop, handleLuaNewBuild, handleLuaSaveBuild, handleLuaLoadBuild, handleLuaGetStats, handleLuaGetTree, handleLuaSetTree, handleSearchTreeNodes, handleListGems, handleGetClasses, handleLuaGetBuildInfo, handleLuaReloadBuild, handleUpdateTreeDelta, handleCreateSpec, handleListSpecs, handleSelectSpec, handleDeleteSpec, handleRenameSpec, handleListItemSets, handleSelectItemSet } from "../handlers/luaHandlers.js";
 import { handleAnalyzeSkillsPoe2, handleSuggestSupportsPoe2 } from "../handlers/poe2SkillHandlers.js";
 import { handleAddItem, handleGetEquippedItems, handleToggleFlask, handleGetSkillSetup, handleSetMainSkill, handleCreateSocketGroup, handleAddGem, handleSetGemLevel, handleSetGemQuality, handleRemoveSkill, handleRemoveGem, handleSetupSkillWithGems, handleAddMultipleItems, handleSetSocketGroupEnabled, handleSetGemEnabled } from "../handlers/itemSkillHandlers.js";
 import { handleAnalyzeDefenses, handleSuggestOptimalNodes, handleOptimizeTree } from "../handlers/optimizationHandlers.js";
@@ -290,6 +290,9 @@ export async function routeToolCall(
         args.include_allocated as boolean | undefined
       );
     }
+
+    case "get_classes":
+      return await handleGetClasses(luaContext);
 
     case "analyze_skills":
       return await handleAnalyzeSkillsPoe2(luaContext);

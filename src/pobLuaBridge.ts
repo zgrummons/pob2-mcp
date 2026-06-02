@@ -424,6 +424,13 @@ async setTree(params: {
     return res.result as { gems: any[]; count: number; total: number };
   }
 
+  /** List PoE2 classes + ascendancies with their engine IDs. */
+  async getClasses(): Promise<{ classes: { classId: number; name: string; ascendancies: { id: number; name: string }[] }[] }> {
+    const res = await this.send({ action: "get_classes" });
+    if (!res.ok) throw new Error(res.error || "get_classes failed");
+    return res.result as { classes: { classId: number; name: string; ascendancies: { id: number; name: string }[] }[] };
+  }
+
   async updateTreeDelta(params: { addNodes?: number[]; removeNodes?: number[]; classId?: number; ascendClassId?: number; secondaryAscendClassId?: number; treeVersion?: string; }): Promise<{ tree: any; autoPathedNodes?: number[]; skippedAscendancyNodes?: number[] }> {
     const res = await this.send({ action: "update_tree_delta", params });
     if (!res.ok) throw new Error(res.error || "update_tree_delta failed");

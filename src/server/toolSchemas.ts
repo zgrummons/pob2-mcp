@@ -495,6 +495,11 @@ export function getLuaToolSchemas(): any[] {
       },
     },
     {
+      name: "get_classes",
+      description: "List PoE2 classes and their ascendancies with the engine's classId / ascendancy ids (use with lua_set_tree). Authoritative — replaces the PoE1 class-ID table.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
       name: "analyze_skills",
       description: "Analyze the loaded build's actual skill setup using the PoB2 engine (PoE2-correct). Shows each socket group's active skill + support gems, flags tag-mismatched supports, empty/disabled gems, and unknown gem names. Prefer this over the legacy PoE1 analyze_skill_links.",
       inputSchema: { type: "object", properties: {} },

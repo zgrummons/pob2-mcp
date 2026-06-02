@@ -711,6 +711,29 @@ export async function handleListGems(
   });
 }
 
+export async function handleGetClasses(context: LuaHandlerContext) {
+  return wrapHandler('get classes', async () => {
+    await context.ensureLuaClient();
+    const luaClient = context.getLuaClient();
+    if (!luaClient) throw new Error('Lua client not initialized. Use lua_start first.');
+
+    const { classes } = await luaClient.getClasses();
+    const lines: string[] = ['=== PoE2 Classes & Ascendancies (from PoB engine) ===', ''];
+    lines.push('Use classId / ascendancy id with lua_set_tree.', '');
+    for (const c of classes) {
+      lines.push(`classId ${c.classId}: **${c.name}**`);
+      if (c.ascendancies.length === 0) {
+        lines.push('    (no ascendancies)');
+      } else {
+        for (const a of c.ascendancies) {
+          lines.push(`    ascendancy ${a.id}: ${a.name}`);
+        }
+      }
+    }
+    return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+  });
+}
+
 export async function handleCreateSpec(context: LuaHandlerContext, title?: string, copyFrom?: number, activate?: boolean) {
   return wrapHandler('create spec', async () => {
     await context.ensureLuaClient();
