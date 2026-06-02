@@ -422,9 +422,11 @@ export class ValidationService {
       typeof stats.get === 'function' ? (stats.get(key) || 0) : (stats[key] || 0);
 
     const evasion = getS('Evasion');
-    const spellSuppression = getS('SpellSuppressionChance');
-    const dodge = getS('DodgeChance') || getS('AttackDodgeChance');
-    const block = getS('BlockChance');
+    // PoE2 avoidance: evade chance (computed by PoB), block, spell block, deflect.
+    const evadeChance = getS('EvadeChance');
+    const block = getS('EffectiveBlockChance') || getS('BlockChance');
+    const spellBlock = getS('EffectiveSpellBlockChance') || getS('SpellBlockChance');
+    const deflect = getS('DeflectChance');
     const armour = getS('Armour');
     const pdr = getS('PhysicalDamageReduction');
     const enduranceCharges = getS('EnduranceChargesMax');
@@ -434,7 +436,7 @@ export class ValidationService {
     const esRecharge = getS('ESRecharge');
     const lifeLeech = getS('LifeLeechGainRate');
 
-    const hasAvoidance = spellSuppression >= 50 || evasion >= 10000 || dodge >= 20 || block >= 20;
+    const hasAvoidance = evadeChance >= 30 || block >= 25 || spellBlock >= 25 || deflect >= 25 || evasion >= 10000;
     const hasMitigation = armour >= 10000 || pdr >= 20 || enduranceCharges >= 2;
     const hasRecovery = lifeRegenPct >= 1 || esRecharge >= 200 || lifeLeech > 0;
 

@@ -75,12 +75,6 @@ export async function handleGetBuildIssues(context: BuildGoalsHandlerContext) {
       issues.push({ severity: 'error', category: 'reservation', message: `Mana over-reserved by ${Math.abs(manaUnreserved)}` });
     }
 
-    // Spell suppression (only flag if build has any invested; use effective value for cap check)
-    const supp = (stats.EffectiveSpellSuppressionChance as number) ?? (stats.SpellSuppressionChance as number) ?? 0;
-    if (supp > 0 && supp < 100) {
-      issues.push({ severity: 'info', category: 'defence', message: `Spell suppression ${supp}% — not capped at 100%` });
-    }
-
     // Zero DPS check
     const totalDPS = (stats.TotalDPS as number) ?? 0;
     const combinedDPS = (stats.CombinedDPS as number) ?? 0;

@@ -43,12 +43,14 @@ export interface LifePoolAnalysis {
 }
 
 export interface AvoidanceAnalysis {
-  spellSuppression: number;
-  dodge: number;
-  spellDodge: number;
+  // PoE2 avoidance: evade (from evasion), block / spell block, and deflect.
+  // PoE2 has no spell suppression and no attack/spell dodge stat (dodge is the
+  // active dodge-roll), so those PoE1 mechanics are intentionally absent.
+  evadeChance: number;
   block: number;
+  spellBlock: number;
+  deflectChance: number;
   evasionRating: number;
-  estimatedEvadeChance: number;
   hasSignificantAvoidance: boolean;
   summary: string;
 }
@@ -120,9 +122,9 @@ export function analyzeDefenses(stats: Record<string, any>): DefensiveAnalysis {
       category: 'layers',
       issue: `Only ${defensiveLayerCount} of 3 defensive layers active (avoidance / mitigation / recovery)`,
       solutions: [
-        'Avoidance: add evasion, spell suppression (50%), dodge, or block',
-        'Mitigation: add armour (Determination aura), endurance charges, or physical reduction',
-        'Recovery: add life regeneration, life leech, or gain-on-hit',
+        'Avoidance: add evasion (evade), block / spell block, or deflect',
+        'Mitigation: add armour, endurance charges, or physical damage reduction',
+        'Recovery: add life regeneration, life leech, or life-on-hit',
       ],
       impact: 'Builds with only one defensive layer are fragile — a single mechanic bypass kills you',
     });
@@ -226,11 +228,11 @@ function analyzeLifePool(stats: Record<string, any>): LifePoolAnalysis {
 }
 
 /**
- * Analyze avoidance layer:
- *   - Spell suppression (50%+ = full cap)
- *   - Evasion (gives % chance to evade attacks)
- *   - Dodge (attack/spell dodge)
- *   - Block
+ * Analyze avoidance layer (PoE2):
+ *   - Evade chance (from evasion vs enemy accuracy — taken directly from PoB)
+ *   - Block / spell block (shields, parry)
+ *   - Deflect (PoE2 deflection mechanic)
+ * PoE2 has no spell suppression and no passive dodge stat.
  */
 function analyzeAvoidance(stats: Record<string, any>): AvoidanceAnalysis {
   const getStat = (key: string): number => {
@@ -239,48 +241,34 @@ function analyzeAvoidance(stats: Record<string, any>): AvoidanceAnalysis {
     return 0;
   };
 
-  const spellSuppression = getStat('EffectiveSpellSuppressionChance') || getStat('SpellSuppressionChance');
-  const dodge = getStat('DodgeChance') || getStat('AttackDodgeChance');
-  const spellDodge = getStat('SpellDodgeChance');
-  const block = getStat('BlockChance');
+  // PoB computes the real evade chance for PoE2; prefer it over any estimate.
+  const evadeChance = getStat('EvadeChance');
+  const block = getStat('EffectiveBlockChance') || getStat('BlockChance');
+  const spellBlock = getStat('EffectiveSpellBlockChance') || getStat('SpellBlockChance');
+  const deflectChance = getStat('DeflectChance');
   const evasionRating = getStat('Evasion');
 
-  // Rough evade chance estimate: evasion / (evasion + attacker_accuracy)
-  // At high tier content, attacker accuracy is roughly 5000–10000
-  // This is a simplified estimate — PoB computes this more precisely
-  const estimatedEvadeChance = evasionRating > 0
-    ? Math.min(75, Math.round((evasionRating / (evasionRating + 7500)) * 100))
-    : 0;
-
   const parts: string[] = [];
-  if (spellSuppression >= 50) parts.push(`spell suppression ${spellSuppression}%`);
-  else if (spellSuppression > 0) parts.push(`partial suppression ${spellSuppression}%`);
-  if (estimatedEvadeChance >= 20) parts.push(`~${estimatedEvadeChance}% evade`);
-  if (dodge >= 20) parts.push(`${dodge}% dodge`);
-  if (spellDodge >= 20) parts.push(`${spellDodge}% spell dodge`);
-  if (block >= 30) parts.push(`${block}% block`);
+  if (evadeChance >= 20) parts.push(`${evadeChance}% evade`);
+  if (block >= 20) parts.push(`${block}% block`);
+  if (spellBlock >= 20) parts.push(`${spellBlock}% spell block`);
+  if (deflectChance >= 20) parts.push(`${deflectChance}% deflect`);
 
-  // A meaningful avoidance layer means at least one solid avoidance mechanic:
-  //   - 50% spell suppression (full cap)
-  //   - OR evasion giving ≥30% evade chance
-  //   - OR dodge/spell dodge ≥30%
-  //   - OR block ≥30%
+  // A meaningful avoidance layer = at least one solid mechanic at a usable level.
   const hasSignificantAvoidance =
-    spellSuppression >= 50 ||
-    estimatedEvadeChance >= 30 ||
-    dodge >= 30 ||
-    spellDodge >= 30 ||
-    block >= 30;
+    evadeChance >= 30 ||
+    block >= 25 ||
+    spellBlock >= 25 ||
+    deflectChance >= 25;
 
   const summary = parts.length > 0 ? parts.join(', ') : 'none';
 
   return {
-    spellSuppression,
-    dodge,
-    spellDodge,
+    evadeChance,
     block,
+    spellBlock,
+    deflectChance,
     evasionRating,
-    estimatedEvadeChance,
     hasSignificantAvoidance,
     summary,
   };
@@ -501,23 +489,23 @@ function generateAvoidanceRecommendations(analysis: AvoidanceAnalysis): Recommen
     recs.push({
       priority: 'medium',
       category: 'avoidance',
-      issue: 'No significant avoidance layer (no evasion, spell suppression, dodge, or block)',
+      issue: 'No significant avoidance layer (low evade, block, spell block, or deflect)',
       solutions: [
-        'Evasion: equip evasion-based armour and run Grace aura',
-        'Spell Suppression: 50% suppression halves spell damage taken — available on tree (Shadow/Ranger side)',
-        'Block: use a shield or staff and invest in block nodes',
-        'Dodge: Acrobatics keystone gives 30% attack/spell dodge (but disables block)',
+        'Evasion: equip evasion-based armour and evasion gear/tree nodes to raise evade chance',
+        'Block: use a shield (or parry-capable weapon) and invest in block / spell block',
+        'Deflect: stack deflection rating to reduce incoming hits',
+        'Remember the active dodge-roll — PoE2 avoidance is partly in your hands, not just stats',
       ],
       impact: 'Without avoidance, every hit lands at full effect — requires pure mitigation + recovery to survive',
     });
-  } else if (analysis.spellSuppression > 0 && analysis.spellSuppression < 50) {
+  } else if (analysis.block > 0 && analysis.block < 25 && analysis.spellBlock < 25) {
     recs.push({
       priority: 'low',
       category: 'avoidance',
-      issue: `Spell suppression is ${analysis.spellSuppression}% — not at 50% cap`,
+      issue: `Block is only ${analysis.block}% — too low to rely on`,
       solutions: [
-        'Cap spell suppression at 50% for full benefit',
-        'Additional suppression nodes or gear can reach the cap',
+        'Invest further in block / spell block to reach a usable level',
+        'A higher-block shield and block nodes make this a real layer',
       ],
     });
   }
@@ -535,10 +523,10 @@ function generateMitigationRecommendations(
       category: 'mitigation',
       issue: 'No meaningful physical damage mitigation',
       solutions: [
-        'Run Determination (armour) or Grace (evasion) aura',
-        'Look for armour/evasion on gear',
-        'Endurance charges provide flat physical mitigation (4% per charge)',
-        'Consider block if using shield or staff',
+        'Stack armour and/or evasion on gear (body armour, helmet, gloves, boots)',
+        'Endurance charges provide flat physical mitigation',
+        'Use a high-armour base and quality your armour pieces',
+        'Consider block if using a shield or parry-capable weapon',
       ],
       impact: 'No mitigation = taking full physical damage from hits',
     });
@@ -565,11 +553,10 @@ function generateSustainRecommendations(analysis: SustainAnalysis): Recommendati
       category: 'sustain',
       issue: 'No sustain mechanism (no regen, leech, or recharge)',
       solutions: [
-        'Life builds: Allocate regen nodes (Vitality aura, life regen notables)',
-        'Add life leech via skill gems (Warlord\'s Mark, leech support) or tree',
-        'ES builds: Ensure ES recharge is working (avoid constant hits or use Wicked Ward)',
-        'Gain on hit provides reliable recovery for fast-hitting builds',
-        'Flasks help but are not a complete sustain solution for endgame bossing',
+        'Life builds: allocate life regeneration notables on the tree',
+        'Add life leech via support gems or gear/tree, or life-on-hit/recoup',
+        'ES builds: ensure ES recharge can start (avoid constant chip damage)',
+        'Life/mana flasks help but are not a complete sustain solution for bossing',
       ],
       impact: 'Without sustain, chip damage and DoTs are lethal; flask reliance fails on "no regen" maps',
     });
@@ -646,21 +633,17 @@ export function formatDefensiveAnalysis(analysis: DefensiveAnalysis): string {
 
   // Avoidance
   output += '**Avoidance Layer:**\n';
-  if (analysis.avoidance.spellSuppression > 0) {
-    const suppIcon = analysis.avoidance.spellSuppression >= 50 ? '✓' : '⚠';
-    output += `${suppIcon} Spell Suppression: ${analysis.avoidance.spellSuppression}%${analysis.avoidance.spellSuppression >= 50 ? ' (capped)' : ' (below 50% cap)'}\n`;
-  }
-  if (analysis.avoidance.estimatedEvadeChance > 0) {
-    output += `  Evasion: ${analysis.avoidance.evasionRating.toLocaleString()} (~${analysis.avoidance.estimatedEvadeChance}% evade)\n`;
-  }
-  if (analysis.avoidance.dodge > 0) {
-    output += `  Dodge: ${analysis.avoidance.dodge}%\n`;
-  }
-  if (analysis.avoidance.spellDodge > 0) {
-    output += `  Spell Dodge: ${analysis.avoidance.spellDodge}%\n`;
+  if (analysis.avoidance.evadeChance > 0) {
+    output += `  Evade: ${analysis.avoidance.evadeChance}% (Evasion ${analysis.avoidance.evasionRating.toLocaleString()})\n`;
   }
   if (analysis.avoidance.block > 0) {
     output += `  Block: ${analysis.avoidance.block}%\n`;
+  }
+  if (analysis.avoidance.spellBlock > 0) {
+    output += `  Spell Block: ${analysis.avoidance.spellBlock}%\n`;
+  }
+  if (analysis.avoidance.deflectChance > 0) {
+    output += `  Deflect: ${analysis.avoidance.deflectChance}%\n`;
   }
   if (!analysis.avoidance.hasSignificantAvoidance) {
     output += `  ⚠ No significant avoidance — all hits land at full effect\n`;
