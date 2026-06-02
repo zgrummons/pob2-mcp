@@ -147,7 +147,10 @@ npm run build
 | `POB_FORK_PATH` | `~/Projects/PathOfBuilding-PoE2/src` | Path to PathOfBuilding-PoE2/src |
 | `POB_CMD` | `luajit` | LuaJIT binary path |
 | `POB_TIMEOUT_MS` | `10000` | Lua request timeout (ms) |
-| `POE_TRADE_ENABLED` | `false` | Enable Trade API tools (⚠️ PoE1 endpoints — unverified for PoE2) |
+| `POE_TRADE_ENABLED` | `false` | Enable Trade API tools (PoE2 `trade2` endpoints — Cloudflare/session-gated, see below) |
+| `POE_SESSION_ID` | — | Your `POESESSID` cookie — required for most Trade API calls (Cloudflare/auth) |
+| `POE_TRADE_BASE` | `…/api/trade2` | Override the trade API base path if GGG changes it |
+| `POE_TRADE_USER_AGENT` | `pob2-mcp-server/0.1 …` | Descriptive contactable User-Agent for trade requests |
 | `POE_NINJA_DISABLED` | `false` | Set `"true"` to hide poe.ninja tools (ported to the PoE2 economy endpoint; on by default) |
 | `POB_LEGACY_GEM_TOOLS` | `false` | Expose the legacy PoE1 skill-gem tools (⚠️ PoE1 gem model; prefer the engine-backed gem tools) |
 
@@ -356,6 +359,13 @@ Pass the **exact**, case-sensitive PoE2 league name (e.g., `Standard`, `Rise of 
 > `get_currency_rates` and `calculate_trading_profit` are the useful tools here.
 
 ### Trade API Tools (Require `POE_TRADE_ENABLED=true`)
+
+Ported to the **PoE2 `trade2`** endpoints (`https://www.pathofexile.com/api/trade2`). Stat IDs and
+leagues are fetched from this base, so the stat mapper picks up PoE2 trade stats automatically.
+
+> **Heads up:** the official trade API is behind Cloudflare and most endpoints require a logged-in
+> session — set `POE_SESSION_ID` to your `POESESSID` cookie. It is also strictly rate-limited. These
+> tools could not be live-verified from this environment; treat as best-effort and report issues.
 
 | Tool | Description |
 |---|---|

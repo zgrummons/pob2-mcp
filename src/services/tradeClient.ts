@@ -20,7 +20,10 @@ import {
  * - Rate limit header parsing
  */
 export class TradeApiClient {
-  private readonly baseUrl = 'https://www.pathofexile.com/api/trade';
+  // PoE2 trade API base (trade2). Stat IDs and leagues are fetched from this base,
+  // so the StatMapper automatically picks up PoE2 trade stats. Override with
+  // POE_TRADE_BASE if GGG changes the path.
+  private readonly baseUrl = process.env.POE_TRADE_BASE || 'https://www.pathofexile.com/api/trade2';
   private readonly limiter: Bottleneck;
   private readonly cache = new Map<string, CacheEntry<any>>();
   private readonly defaultCacheTTL: number;
@@ -206,13 +209,17 @@ export class TradeApiClient {
     url: string,
     body?: any
   ): Promise<T> {
-    const options: RequestInit = {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'pob-mcp-server/1.0',
-      },
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // GGG asks for a descriptive, contactable User-Agent.
+      'User-Agent': process.env.POE_TRADE_USER_AGENT || 'pob2-mcp-server/0.1 (+https://github.com/PathOfBuildingCommunity)',
     };
+    // The trade API sits behind Cloudflare and most endpoints require a logged-in
+    // session. Provide POESESSID to authenticate (export POE_SESSION_ID=...).
+    if (process.env.POE_SESSION_ID) {
+      headers['Cookie'] = `POESESSID=${process.env.POE_SESSION_ID}`;
+    }
+    const options: RequestInit = { method, headers };
 
     if (body) {
       options.body = JSON.stringify(body);
