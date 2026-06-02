@@ -500,6 +500,24 @@ export function getLuaToolSchemas(): any[] {
       inputSchema: { type: "object", properties: {} },
     },
     {
+      name: "import_build",
+      description: "Import a PoE2 build from a Path of Building export code OR a share link (pobb.in / pastebin), decode it, and load it into the engine. After importing, use analyze_skills / suggest_supports / analyze_defenses / validate_build / lua_get_stats.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          source: {
+            type: "string",
+            description: "A PoB2 export code (base64) or a pobb.in/pastebin URL to the build.",
+          },
+          save_as: {
+            type: "string",
+            description: "Optional filename to also save the decoded build into your builds directory (so file-based tools like analyze_build can use it).",
+          },
+        },
+        required: ["source"],
+      },
+    },
+    {
       name: "analyze_skills",
       description: "Analyze the loaded build's actual skill setup using the PoB2 engine (PoE2-correct). Shows each socket group's active skill + support gems, flags tag-mismatched supports, empty/disabled gems, and unknown gem names. Prefer this over the legacy PoE1 analyze_skill_links.",
       inputSchema: { type: "object", properties: {} },

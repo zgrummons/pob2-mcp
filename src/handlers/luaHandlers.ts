@@ -711,6 +711,48 @@ export async function handleListGems(
   });
 }
 
+export async function handleImportBuild(
+  context: LuaHandlerContext,
+  source: string,
+  saveAs?: string
+) {
+  return wrapHandler('import build', async () => {
+    if (!source || !source.trim()) {
+      throw new Error("Provide a PoB2 export code or a pobb.in/pastebin link as 'source'.");
+    }
+    await context.ensureLuaClient();
+    const luaClient = context.getLuaClient();
+    if (!luaClient) throw new Error('Lua client not initialized. Use lua_start first.');
+
+    const { resolveBuildXml } = await import('../utils/buildCode.js');
+    const xml = await resolveBuildXml(source);
+
+    const name = saveAs ? saveAs.replace(/\.xml$/i, '') : 'Imported Build';
+    await luaClient.loadBuildXml(xml, name);
+    const info = await luaClient.getBuildInfo();
+    let skillGroups = 0;
+    try { skillGroups = ((await luaClient.getSkills())?.groups || []).length; } catch { /* non-fatal */ }
+
+    const lines: string[] = ['=== Build Imported ===', ''];
+    lines.push(`Class: ${info?.className ?? 'Unknown'}${info?.ascendClassName && info.ascendClassName !== 'None' ? ` (${info.ascendClassName})` : ''}`);
+    lines.push(`Level: ${info?.level ?? '?'}`);
+    if (info?.treeVersion) lines.push(`Tree version: ${info.treeVersion}`);
+    lines.push(`Socket groups: ${skillGroups}`);
+
+    // Optionally persist to POB_DIRECTORY so file-based tools (analyze_build, etc.) can use it.
+    if (saveAs) {
+      const fileName = /\.xml$/i.test(saveAs) ? saveAs : `${saveAs}.xml`;
+      const savePath = sanitizeBuildName(fileName, context.pobDirectory);
+      await fs.mkdir(path.dirname(savePath), { recursive: true });
+      await fs.writeFile(savePath, xml, 'utf8');
+      lines.push('', `Saved to: ${fileName} (in your builds directory)`);
+    }
+
+    lines.push('', 'The build is loaded in the engine. Try: analyze_skills, suggest_supports, analyze_defenses, validate_build, lua_get_stats.');
+    return { content: [{ type: "text" as const, text: lines.join('\n') }] };
+  });
+}
+
 export async function handleGetClasses(context: LuaHandlerContext) {
   return wrapHandler('get classes', async () => {
     await context.ensureLuaClient();

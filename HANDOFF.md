@@ -144,7 +144,11 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   tools work headless as long as a valid POESESSID is provided.
 - **PoE2 build parsing** — `parseFlasks` reads Charm slots (ailment immunity from Thawing/Staunching/…),
   no longer assumes 5 flask slots; build issues flag **Spirit** over-reservation.
-- **Full unit + integration suite green** (257 tests).
+- **`import_build` tool** — accepts a PoB2 export code OR a pobb.in/pastebin link, decodes it
+  (`src/utils/buildCode.ts`: base64url → zlib inflate), loads it into the engine, and optionally saves
+  to `POB_DIRECTORY` (`save_as`). Verified live against a pobb.in link. `get_build_info` now resolves
+  class/ascendancy from the spec/tree (so imported builds show e.g. "Monk (Martial Artist)").
+- **Full unit + integration suite green** (263 tests).
 
 ### Carried over from PoE1 — needs PoE2 review
 - poe.ninja `find_arbitrage` is inert (the PoE2 currency-exchange feed has no buy/sell spread).
