@@ -127,12 +127,16 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
 - **Legacy PoE1 gem tools deregistered** — `analyze_skill_links`, `suggest_support_gems`,
   `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path` are no longer
   exposed unless `POB_LEGACY_GEM_TOOLS=true`. The engine-backed tools supersede them.
-- **poe.ninja ported to PoE2** — `/poe2/api/economy/currencyexchange`; transforms the PoE2
-  `{lines,items}` shape into the existing `CurrencyOverview`. On by default (`POE_NINJA_DISABLED=true`
-  to hide). `find_arbitrage` is documented as inert on the spread-less PoE2 feed. Unit-tested.
-- **Trade API ported to PoE2 `trade2`** — base `…/api/trade2` (so StatMapper auto-loads PoE2 trade
-  stats); optional `POE_SESSION_ID` (POESESSID) + `POE_TRADE_BASE`/`POE_TRADE_USER_AGENT`. Still behind
-  `POE_TRADE_ENABLED`; Cloudflare/session-gated and **not live-verifiable from here** (best-effort).
+- **poe.ninja ported to PoE2 — LIVE-VERIFIED** — endpoint is
+  `/poe2/api/economy/exchange/current/overview?league=<League>&type=Currency` (the docs' `currencyexchange`
+  path 404s). Base currency is **Exalted Orb** (primaryValue=1), not Chaos — map anchors Exalted=1,
+  output relabelled to `ex`. Verified against `Runes of Aldur` (48 currencies, Mirror 50,990 ex). On by
+  default (`POE_NINJA_DISABLED=true`). `find_arbitrage` inert (spread-less feed). Unit-tested.
+- **Trade API ported to PoE2 `trade2`** — base `…/api/trade2`; search is `/search/poe2/<league>` and
+  fetch passes `realm=poe2` (confirmed from `/data/leagues` reporting `realm:"poe2"`). StatMapper
+  auto-loads PoE2 trade stats. Optional `POE_SESSION_ID` (POESESSID) + `POE_TRADE_BASE`/`POE_TRADE_REALM`/
+  `POE_TRADE_USER_AGENT`. Behind `POE_TRADE_ENABLED`; Cloudflare/session-gated — search/fetch round-trip
+  not yet live-confirmed (needs a real session).
 - **PoE2 build parsing** — `parseFlasks` reads Charm slots (ailment immunity from Thawing/Staunching/…),
   no longer assumes 5 flask slots; build issues flag **Spirit** over-reservation.
 - **Full unit + integration suite green** (257 tests).
