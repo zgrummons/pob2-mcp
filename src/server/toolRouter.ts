@@ -18,6 +18,7 @@ import { handleStartWatching, handleStopWatching, handleGetRecentChanges, handle
 import { handleCompareTrees, handleGetNearbyNodes, handleFindPath, handleGetPassiveUpgrades, handleSuggestMasteries } from "../handlers/treeHandlers.js";
 import { handleGetBuildIssues, formatIssuesResponse } from "../handlers/buildGoalsHandlers.js";
 import { handleLuaStart, handleLuaStop, handleLuaNewBuild, handleLuaSaveBuild, handleLuaLoadBuild, handleLuaGetStats, handleLuaGetTree, handleLuaSetTree, handleSearchTreeNodes, handleListGems, handleLuaGetBuildInfo, handleLuaReloadBuild, handleUpdateTreeDelta, handleCreateSpec, handleListSpecs, handleSelectSpec, handleDeleteSpec, handleRenameSpec, handleListItemSets, handleSelectItemSet } from "../handlers/luaHandlers.js";
+import { handleAnalyzeSkillsPoe2, handleSuggestSupportsPoe2 } from "../handlers/poe2SkillHandlers.js";
 import { handleAddItem, handleGetEquippedItems, handleToggleFlask, handleGetSkillSetup, handleSetMainSkill, handleCreateSocketGroup, handleAddGem, handleSetGemLevel, handleSetGemQuality, handleRemoveSkill, handleRemoveGem, handleSetupSkillWithGems, handleAddMultipleItems, handleSetSocketGroupEnabled, handleSetGemEnabled } from "../handlers/itemSkillHandlers.js";
 import { handleAnalyzeDefenses, handleSuggestOptimalNodes, handleOptimizeTree } from "../handlers/optimizationHandlers.js";
 import { handleAnalyzeItems, handleOptimizeSkillLinks, handleCreateBudgetBuild } from "../handlers/advancedOptimizationHandlers.js";
@@ -289,6 +290,16 @@ export async function routeToolCall(
         args.include_allocated as boolean | undefined
       );
     }
+
+    case "analyze_skills":
+      return await handleAnalyzeSkillsPoe2(luaContext);
+
+    case "suggest_supports":
+      return await handleSuggestSupportsPoe2(
+        luaContext,
+        (args?.group_index ?? args?.groupIndex) as number,
+        (args?.count) as number | undefined
+      );
 
     case "list_gems":
       return await handleListGems(luaContext, {

@@ -495,6 +495,29 @@ export function getLuaToolSchemas(): any[] {
       },
     },
     {
+      name: "analyze_skills",
+      description: "Analyze the loaded build's actual skill setup using the PoB2 engine (PoE2-correct). Shows each socket group's active skill + support gems, flags tag-mismatched supports, empty/disabled gems, and unknown gem names. Prefer this over the legacy PoE1 analyze_skill_links.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "suggest_supports",
+      description: "Suggest compatible support gems for a socket group's active skill, drawn from PoB2's gem database and ranked by tag relevance (PoE2-correct). Excludes supports already socketed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          group_index: {
+            type: "number",
+            description: "Socket group number to suggest supports for (see analyze_skills output).",
+          },
+          count: {
+            type: "number",
+            description: "How many suggestions to return (default 8, max 20).",
+          },
+        },
+        required: ["group_index"],
+      },
+    },
+    {
       name: "add_item",
       description: "Add an item to the build from item text (paste from game)",
       inputSchema: {

@@ -7,8 +7,8 @@ state so work can resume cleanly. Last updated: 2026-06-01.
 
 | Repo | Branch | Commit | Contents |
 |---|---|---|---|
-| `pob2-mcp/` | `main` | `2190b85` | The TypeScript MCP server (this project). No git remote yet. |
-| `PathOfBuilding-PoE2/` | `api-stdio-poe2` (off `dev`) | `ab38fe8` | The Lua bridge port: `src/API/*`, `src/utf8.lua`, `HeadlessWrapper.lua` hooks. |
+| `pob2-mcp/` | `main` | HEAD (see `git log`) | The TypeScript MCP server (this project). No git remote yet. |
+| `PathOfBuilding-PoE2/` | `api-stdio-poe2` (off `dev`) | `0881f49` | The Lua bridge port: `src/API/*` (+`list_gems`, get_skills gem breakdown), `src/utf8.lua`, `HeadlessWrapper.lua` hooks. |
 
 `PathOfBuilding-PoE2`'s `origin` is the community upstream (no push rights); `dev` is left pristine
 for pulling upstream. To back up the bridge, push `api-stdio-poe2` to a personal fork. SHAs are the
@@ -102,23 +102,34 @@ MCP config (Claude Desktop) — see `claude_desktop_config.example.json`. Key en
   Brine King/Aquamarine refs; life thresholds lowered — **estimates, revisit**; Spirit-reservation note).
 - **`list_gems`** MCP tool: queries PoB2's authoritative gem DB (`build.data.gems`) — filter by
   type/search/tag, dedupe by name. Full chain verified (tool → router → handler → bridge → engine).
+- **PoE2-native skill analysis** (replaces the PoE1 heuristics for the common cases):
+  - `BuildOps.get_skills` now returns an engine-truth per-gem breakdown (active vs support via
+    `gemData.grantedEffect.support`, level, quality, enabled, tags).
+  - `analyze_skills` tool — shows each socket group's active skill + supports, flags tag-mismatched
+    supports (e.g. an Attack support on a Cold spell), empty/disabled/unknown gems.
+  - `suggest_supports` tool — ranks compatible, unused supports from the engine gem DB by tag
+    relevance. Service: `services/poe2SkillService.ts`; handlers: `handlers/poe2SkillHandlers.ts`.
+    Compatibility is a tag-gating heuristic (delivery tags gate; descriptive tags rank).
+    Verified end-to-end (Ice Nova: flags Runic Infusion mismatch; suggests Cold Exposure/Frost Nexus/…).
 
 ### Carried over from PoE1 — needs PoE2 review
-- **Skill-gem analysis** (`skillGemService.ts`, ~936 lines + `skillGemHandlers.ts`): hand-coded PoE1
-  gem DB, archetype templates, and a **6-link assumption**. Wrong for PoE2 (uncut skills + per-skill
-  support sockets, no Awakened/Empower/Enlighten). Tools affected: `analyze_skill_links`,
-  `suggest_support_gems`, `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`,
-  `gem_upgrade_path`. **Next planned task — rewrite on top of `list_gems` + engine `ProcessSocketGroup`.**
+- **Legacy skill-gem tools** (`skillGemService.ts`, ~936 lines + `skillGemHandlers.ts`): hand-coded
+  PoE1 gem DB, archetype templates, 6-link assumption. **Superseded for analysis/suggestions by
+  `analyze_skills` / `suggest_supports` above** — prefer those. Still-PoE1 and not yet ported:
+  `validate_gem_quality`, `compare_gem_setups`, `find_optimal_links`, `gem_upgrade_path`
+  (and the old `analyze_skill_links` / `suggest_support_gems`, which remain registered).
 - Defensive analyzer thresholds; class/ascendancy ID tables in some tool descriptions.
 - `poe.ninja` + Trade API (PoE1 leagues/URLs); not validated for PoE2.
 - `clusterJewelHandlers` (non-MVP) — PoE1 cluster jewel model + needs the `PathOfBuilding2` fix.
 
 ## Recommended next steps (in order)
 
-1. **Rewrite `skillGemService` for PoE2** on top of `list_gems`: drop archetype/6-link logic; model
-   per-skill support sockets; use the engine to validate support compatibility. Get a real PoE2 build
-   (with gems) to test against — none are bundled; generate one via the bridge or import a build code.
-2. Add a real integration test under `pob2-mcp/tests/` (promote a verify script).
+1. **Deepen support suggestions with real DPS** — current `suggest_supports` ranks by tag heuristic;
+   optionally socket each candidate, recalc, report stat delta, then remove (engine-truth value).
+   Also port the remaining legacy gem tools (`validate_gem_quality`, `find_optimal_links`, etc.) or
+   retire them in favour of the engine-backed pair.
+2. Add a real integration test under `pob2-mcp/tests/` (promote a verify script) covering the bridge,
+   the `<PathOfBuilding2>` parse, `list_gems`, and `analyze_skills`/`suggest_supports`.
 3. Audit `poe.ninja`/Trade for PoE2 (new endpoints/leagues) or gate them off until ported.
 4. Validate class/ascendancy ID tables in tool docs against PoE2 (`PassiveSpec`/tree class map).
 
