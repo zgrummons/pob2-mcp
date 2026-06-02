@@ -8,7 +8,7 @@ state so work can resume cleanly. Last updated: 2026-06-01.
 | Repo | Branch | Commit | Contents |
 |---|---|---|---|
 | `pob2-mcp/` | `main` | HEAD (see `git log`) | The TypeScript MCP server (this project). No git remote yet. |
-| `PathOfBuilding-PoE2/` | `api-stdio-poe2` (off `dev`) | `0881f49` | The Lua bridge port: `src/API/*` (+`list_gems`, get_skills gem breakdown), `src/utf8.lua`, `HeadlessWrapper.lua` hooks. |
+| `PathOfBuilding-PoE2/` | `api-stdio-poe2` (off `dev`) | `7b5a673` | The Lua bridge port: `src/API/*` (+`list_gems`, get_skills gem breakdown, `get_classes`), `src/utf8.lua`, `HeadlessWrapper.lua` hooks. |
 
 `PathOfBuilding-PoE2`'s `origin` is the community upstream (no push rights); `dev` is left pristine
 for pulling upstream. To back up the bridge, push `api-stdio-poe2` to a personal fork. SHAs are the
