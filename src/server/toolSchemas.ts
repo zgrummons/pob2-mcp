@@ -853,7 +853,7 @@ export function getLuaToolSchemas(): any[] {
     },
     {
       name: "plan_leveling",
-      description: "Generate an act-by-act leveling progression guide for a build, including skill gem progression, lab timing, and passive tree priority order",
+      description: "Generate a PoE2 0.5 leveling guide for a build: act/interlude progression with bosses and level targets, Trials of Ascendancy timing, skill-tag-aware support direction, support-socket guidance, and passive tree priority order",
       inputSchema: {
         type: "object",
         properties: {

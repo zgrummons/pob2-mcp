@@ -1,44 +1,102 @@
 /**
- * Leveling Handlers
+ * Leveling Handlers (PoE2)
  *
- * Generates act-by-act leveling progression guides using the build's class,
- * main skill, and ascendancy. Reads from the Lua bridge if available, or
- * falls back to user-provided args.
+ * Generates a PoE2 0.5 leveling guide from the loaded build's class /
+ * ascendancy / main skill. The campaign structure (acts, interludes, bosses,
+ * level targets, Trials of Ascendancy) comes from the verified dataset in
+ * `data/poe2Campaign.ts`; early-skill and support direction are driven by the
+ * build's actual skill tags via the engine gem DB (`list_gems`) using the same
+ * tag-gating logic as `analyze_skills` / `suggest_supports`.
+ *
+ * This is PoE2-specific: no Labyrinth, no 10-act PoE1 campaign, no gear-based
+ * 2L–6L links, no PoE1 vendor recipes / weapon-swap gem XP.
  */
 
 import type { PoBLuaApiClient } from "../pobLuaBridge.js";
 import { wrapHandler } from "../utils/errorHandling.js";
+import {
+  POE2_CAMPAIGN,
+  POE2_CAMPAIGN_ASCENDANCY_POINTS,
+  POE2_GEM_NOTES,
+} from "../data/poe2Campaign.js";
+import {
+  effectiveTagSet,
+  resolveActiveSkillTags,
+  rankSupportsForSkillTags,
+  type SupportSuggestion,
+} from "../services/poe2SkillService.js";
 
 export interface LevelingContext {
   getLuaClient: () => PoBLuaApiClient | null;
   ensureLuaClient: () => Promise<void>;
 }
 
-// Act-by-act milestone levels (PoE 1 campaign)
-const ACT_MILESTONES = [
-  { act: 1, level: 12, label: 'End of Act 1 (Merveil)' },
-  { act: 2, level: 22, label: 'End of Act 2 (Vaal Oversoul)' },
-  { act: 3, level: 32, label: 'End of Act 3 (Dominus)' },
-  { act: 4, level: 40, label: 'End of Act 4 (Malachai)' },
-  { act: 5, level: 46, label: 'End of Act 5 (Kitava)' },
-  { act: 6, level: 52, label: 'End of Act 6 (Tsoagoth)' },
-  { act: 7, level: 58, label: 'End of Act 7 (Arakaali)' },
-  { act: 8, level: 64, label: 'End of Act 8 (Lunaris & Solaris)' },
-  { act: 9, level: 68, label: 'End of Act 9 (The Depraved Trinity)' },
-  { act: 10, level: 70, label: 'End of Act 10 / Maps (Kitava)' },
-];
+interface ResolvedSkill {
+  name: string;
+  tags: Set<string>;
+  tagString: string;
+  /** Supports already socketed on the main skill (excluded from suggestions). */
+  usedSupports: Set<string>;
+}
 
-const CLASS_STARTER_SKILLS: Record<string, { early: string; links: string[] }> = {
-  Marauder: { early: 'Infernal Blow or Heavy Strike', links: ['Maim Support', 'Onslaught Support'] },
-  Ranger: { early: 'Splitting Steel or Burning Arrow', links: ['Pierce Support', 'Lesser Multiple Projectiles'] },
-  Witch: { early: 'Freezing Pulse or Arc', links: ['Arcane Surge Support', 'Added Lightning Damage'] },
-  Duelist: { early: 'Cleave or Splitting Steel', links: ['Maim Support', 'Onslaught Support'] },
-  Templar: { early: 'Holy Flame Totem or Arc', links: ['Arcane Surge Support', 'Controlled Destruction'] },
-  Shadow: { early: 'Viper Strike or Freezing Pulse', links: ['Added Chaos Damage', 'Onslaught Support'] },
-  Scion: { early: 'Cleave or Arc', links: ['Onslaught Support', 'Added Lightning Damage'] },
-};
+/**
+ * Resolve the build's main skill (name + effective tags) for tailoring filler
+ * and support direction. Prefers the loaded build's main socket group; falls
+ * back to looking the skill up by name in the engine gem DB (so a freshly-made
+ * build with only `main_skill` provided still gets tag-aware output).
+ */
+async function resolveMainSkill(
+  client: PoBLuaApiClient | null,
+  overrideSkill?: string
+): Promise<ResolvedSkill | null> {
+  if (!client) {
+    return overrideSkill ? { name: overrideSkill, tags: new Set(), tagString: "", usedSupports: new Set() } : null;
+  }
 
-const ASCENDANCY_UNLOCK = { normal: 36, cruel: 55, merciless: 68 };
+  // Try the loaded build's main socket group first.
+  try {
+    const skills = await client.getSkills();
+    const groups: any[] = skills?.groups || [];
+    if (groups.length > 0) {
+      const mainGroup = groups.find((g) => g.index === skills.mainSocketGroup) || groups[0];
+      const activeGem = (mainGroup?.gems || []).find((gm: any) => !gm.isSupport) || null;
+      const usedSupports = new Set<string>(
+        (mainGroup?.gems || []).filter((gm: any) => gm.isSupport).map((gm: any) => String(gm.name).toLowerCase())
+      );
+      // No override (or it matches the loaded skill): use the live gem's tags directly.
+      if (activeGem && (!overrideSkill || overrideSkill.toLowerCase() === String(activeGem.name).toLowerCase())) {
+        return {
+          name: activeGem.name,
+          tags: effectiveTagSet(activeGem),
+          tagString: activeGem.tags || "",
+          usedSupports,
+        };
+      }
+    }
+  } catch {
+    // fall through to name-based resolution
+  }
+
+  // Resolve by name from the gem DB (override given, or no skills loaded).
+  const skillName = overrideSkill;
+  if (skillName) {
+    try {
+      const resolved = await resolveActiveSkillTags(client, skillName);
+      if (resolved) {
+        return { name: resolved.name, tags: resolved.tags, tagString: resolved.tagString, usedSupports: new Set() };
+      }
+    } catch {
+      // fall through
+    }
+    return { name: skillName, tags: new Set(), tagString: "", usedSupports: new Set() };
+  }
+  return null;
+}
+
+function formatSupportLine(s: SupportSuggestion): string {
+  const why = s.shared.length ? ` (${s.shared.join("/")})` : s.reason ? ` (${s.reason})` : "";
+  return `**${s.name}**${why}`;
+}
 
 export async function handlePlanLeveling(
   context: LevelingContext,
@@ -49,100 +107,106 @@ export async function handlePlanLeveling(
     ascendancy?: string;
   }
 ) {
-  return wrapHandler('plan leveling', async () => {
-  let className = args.class_name;
-  let mainSkill = args.main_skill;
-  let ascendancy = args.ascendancy;
+  return wrapHandler("plan leveling", async () => {
+    let className = args.class_name;
+    let ascendancy = args.ascendancy;
 
-  // Try to read info from the currently loaded Lua build
-  const luaClient = context.getLuaClient();
-  if (luaClient) {
-    try {
-      const info = await luaClient.getBuildInfo();
-      className = className || info.class;
-      ascendancy = ascendancy || info.ascendancy;
+    const luaClient = context.getLuaClient();
 
-      if (!mainSkill) {
-        const skills = await luaClient.getSkills();
-        if (skills?.groups?.length > 0) {
-          const mainGroup =
-            skills.groups.find((g: any) => g.index === skills.mainSocketGroup) ||
-            skills.groups[0];
-          mainSkill =
-            mainGroup?.gems?.[0]?.name ||
-            mainGroup?.skills?.[0] ||
-            'your main skill';
-        }
+    // Pull class / ascendancy from the loaded build. NOTE: the engine returns
+    // `className` / `ascendClassName` (resolved from the passive tree) — earlier
+    // versions read `class` / `ascendancy` here, which were always undefined.
+    if (luaClient) {
+      try {
+        const info = await luaClient.getBuildInfo();
+        className = className || info?.className;
+        ascendancy = ascendancy || info?.ascendClassName;
+      } catch {
+        // use whatever args provided
       }
-    } catch {
-      // Fall through and use whatever was provided in args
     }
-  }
 
-  // Defaults when neither Lua nor args provide a value
-  className = className || 'Witch';
-  mainSkill = mainSkill || 'your main skill';
-  ascendancy = ascendancy || 'Unknown';
+    const skill = await resolveMainSkill(luaClient, args.main_skill);
+    const mainSkill = skill?.name || "your main skill";
 
-  const starter = CLASS_STARTER_SKILLS[className] || CLASS_STARTER_SKILLS['Witch'];
+    // Tag-aware support direction for the main skill (engine gem DB).
+    let supports: SupportSuggestion[] = [];
+    if (luaClient && skill && skill.tags.size > 0) {
+      try {
+        supports = await rankSupportsForSkillTags(luaClient, skill.tags, {
+          count: 5,
+          exclude: skill.usedSupports,
+        });
+      } catch {
+        supports = [];
+      }
+    }
 
-  let output = `# Leveling Guide: ${className} (${ascendancy})\n`;
-  output += `**Main Skill:** ${mainSkill}\n\n`;
+    const classLabel = className
+      ? ascendancy && ascendancy !== "None"
+        ? `${className} / ${ascendancy}`
+        : className
+      : "Unknown class";
 
-  output += `## Before Your Main Skill is Available\n`;
-  output += `Use: **${starter.early}**\n`;
-  output += `Support with: ${starter.links.join(', ')}\n\n`;
+    const descriptive = skill ? [...skill.tags].filter((t) => !["support"].includes(t)) : [];
+    const typeHint = skill?.tagString || descriptive.join(", ");
 
-  output += `## Act Milestones\n\n`;
+    let out = `# PoE2 Leveling Guide: ${classLabel}\n`;
+    out += `**Main Skill:** ${mainSkill}${typeHint ? ` _(${typeHint})_` : ""}\n\n`;
 
-  for (const m of ACT_MILESTONES) {
-    output += `### Act ${m.act} (Level ~${m.level}) — ${m.label}\n`;
-
-    if (m.level <= 28) {
-      output += `- Still leveling with starter skill; switch to ${mainSkill} when available (usually level 12-18)\n`;
+    // --- Early leveling -----------------------------------------------------
+    out += `## Early Leveling\n`;
+    out += `- PoE2 lets you cut **${mainSkill}** from an uncut skill gem early — use it as soon as it's available and you meet the attribute requirement.\n`;
+    if (typeHint) {
+      out += `- Before then, fill in with any early skill of the same type (${typeHint}) so your passive/gear investment carries over.\n`;
     } else {
-      output += `- Should be running ${mainSkill} in ${m.level >= 38 ? 'a 4-link' : '3-link'}\n`;
+      out += `- Before then, use any early skill that matches your intended damage type so your passives carry over.\n`;
+    }
+    if (supports.length > 0) {
+      out += `- **Support direction for ${mainSkill}** (add as the skill gem levels and opens sockets):\n`;
+      for (const s of supports) out += `  - ${formatSupportLine(s)}\n`;
+      out += `  _Each support is unique to one skill — reserve these for ${mainSkill}._\n`;
+    } else if (luaClient) {
+      out += `- Use \`suggest_supports\` on a loaded build for measured support recommendations.\n`;
+    }
+    out += `\n`;
+
+    // --- Campaign -----------------------------------------------------------
+    out += `## Campaign Progression (PoE2 0.5)\n\n`;
+    for (const seg of POE2_CAMPAIGN) {
+      out += `### ${seg.name} — ${seg.finalBoss} (~Lvl ${seg.levelEnd})\n`;
+      if (seg.trial) {
+        const unlocks = seg.trial.unlocksAscendancy ? " — first completion **unlocks your Ascendancy**" : "";
+        out += `- **${seg.trial.name}** → +${seg.trial.ascendancyPoints} ascendancy points${unlocks}.\n`;
+        out += `  - ${seg.trial.access}\n`;
+      }
+      for (const note of seg.notes || []) out += `- ${note}\n`;
+      out += `- Re-cap **Fire / Cold / Lightning** resistances — progression applies resistance penalties at major story steps.\n`;
+      out += `\n`;
     }
 
-    if (m.level >= ASCENDANCY_UNLOCK.normal && m.level < ASCENDANCY_UNLOCK.cruel) {
-      output += `- **Do Labyrinth (Normal)** — unlock first 2 ascendancy points\n`;
+    // --- Ascendancy ---------------------------------------------------------
+    out += `## Ascendancy (Trials of Ascendancy)\n`;
+    out += `Ascendancy in PoE2 is unlocked through the **Trials of Ascendancy** — there is no campaign maze to run. Your ${POE2_CAMPAIGN_ASCENDANCY_POINTS} in-campaign points come from:\n`;
+    for (const seg of POE2_CAMPAIGN) {
+      if (seg.trial) out += `- **${seg.trial.name}** (${seg.name}) — +${seg.trial.ascendancyPoints} points\n`;
     }
-    if (m.level >= ASCENDANCY_UNLOCK.cruel && m.level < ASCENDANCY_UNLOCK.merciless) {
-      output += `- **Do Labyrinth (Cruel)** — unlock next 2 ascendancy points\n`;
-    }
-    if (m.level >= ASCENDANCY_UNLOCK.merciless) {
-      output += `- **Do Labyrinth (Merciless)** when ready — final 2 ascendancy points\n`;
-    }
+    out += `The remaining points (up to 8 total) come from higher-tier endgame Trials (Sekhemas / Chaos with higher-level keys, and Trial of the Hidden).\n\n`;
 
-    output += `- Resist priority: cap Fire/Cold/Lightning at each difficulty transition\n`;
-    output += '\n';
-  }
+    // --- Gems ---------------------------------------------------------------
+    out += `## Gems & Support Sockets (PoE2)\n`;
+    for (const note of POE2_GEM_NOTES) out += `- ${note}\n`;
+    out += `\n`;
 
-  output += `## Gem Link Progression\n\n`;
-  output += `| Milestone | Links | Setup |\n`;
-  output += `|-----------|-------|-------|\n`;
-  output += `| Level 1-12 | 2L | ${mainSkill} + Onslaught |\n`;
-  output += `| Level 12-28 | 3L | ${mainSkill} + 2 key supports |\n`;
-  output += `| Level 28-50 | 4L | ${mainSkill} + 3 supports |\n`;
-  output += `| Level 50-70 | 5L | ${mainSkill} + 4 supports |\n`;
-  output += `| Endgame | 6L | ${mainSkill} + 5 supports |\n\n`;
+    // --- Passive tree -------------------------------------------------------
+    out += `## Passive Tree Priority\n`;
+    out += `1. Path toward your main damage cluster for ${mainSkill}\n`;
+    out += `2. Life and Spirit on the way (Spirit funds your reservations/auras in PoE2)\n`;
+    out += `3. Resistances near your path to stay capped through act transitions\n`;
+    out += `4. Take your Ascendancy nodes as soon as each Trial unlocks them\n`;
+    out += `5. Jewel sockets once you have worthwhile leveling jewels\n\n`;
+    out += `_Use \`suggest_optimal_nodes\` / \`get_passive_upgrades\` on a loaded build for specific node recommendations._\n`;
 
-  output += `## Key Tips\n`;
-  output += `- Grab **movement speed boots** in Act 2 — most impactful early upgrade\n`;
-  output += `- Vendor recipe for leveling weapons: magic weapon + rustic sash + blacksmith's whetstone = weapon with % physical damage\n`;
-  output += `- Prioritize resistances over damage on gear — you will feel the difference at each act\n`;
-  output += `- Allocate ascendancy passives after each Lab — they are huge power spikes\n`;
-  output += `- Level your 6-link gems in a weapon swap to get XP while using weaker links\n\n`;
-
-  output += `## Passive Tree Priority Order\n`;
-  output += `1. Path to your class's key damage cluster\n`;
-  output += `2. Life nodes along the way\n`;
-  output += `3. Resistance nodes near your path\n`;
-  output += `4. Ascendancy path once you know your lab routing\n`;
-  output += `5. Jewel sockets when you have good leveling jewels\n\n`;
-
-  output += `_Use \`get_passive_upgrades\` with a loaded build for specific node recommendations._\n`;
-
-  return { content: [{ type: 'text' as const, text: output }] };
+    return { content: [{ type: "text" as const, text: out }] };
   });
 }

@@ -11,6 +11,7 @@ import path from "path";
 import fs from "fs";
 import { PoBLuaApiClient } from "../../src/pobLuaBridge";
 import { Poe2SkillService } from "../../src/services/poe2SkillService";
+import { handlePlanLeveling } from "../../src/handlers/levelingHandlers";
 
 const forkSrc = process.env.POB_FORK_PATH
   || path.resolve(__dirname, "..", "..", "..", "PathOfBuilding-PoE2", "src");
@@ -93,5 +94,29 @@ d("PoE2 Lua bridge (integration)", () => {
     const suggestions = await svc.suggestSupports(api, g.index, 5);
     expect(suggestions.activeSkill).toBe("Ice Nova");
     expect(suggestions.suggestions.length).toBeGreaterThan(0);
+  }, 60000);
+
+  it("plans PoE2 leveling: resolves Witch/Abyssal Lich, Trials not Labyrinth, skill-tailored", async () => {
+    if (!ready) return;
+    // Set Witch / Abyssal Lich via the tree (new_build always spawns the default class).
+    const { classes } = await api.getClasses();
+    const witch = classes.find((c) => c.name === "Witch")!;
+    const abyssal = witch.ascendancies.find((a) => a.name === "Abyssal Lich")!;
+    await api.updateTreeDelta({ classId: witch.classId, ascendClassId: abyssal.id });
+
+    const ctx = { getLuaClient: () => api, ensureLuaClient: async () => {} };
+    const out = (await handlePlanLeveling(ctx, { main_skill: "Entangle" })).content[0].text;
+
+    // Acceptance: correct title (no "Unknown"), PoE2 trials/bosses, skill-tailored, no PoE1-isms.
+    expect(out).toContain("Witch / Abyssal Lich");
+    expect(out).not.toContain("Unknown");
+    expect(out).toContain("Trial of the Sekhemas");
+    expect(out).toContain("Count Geonor");
+    expect(out).toContain("Entangle");
+    // Entangle is a Plant skill — its tag-matched supports should surface.
+    expect(out.toLowerCase()).toContain("plant");
+    for (const poe1 of ["Labyrinth", "rustic sash", "Merveil", "6-link", "weapon swap", "Freezing Pulse"]) {
+      expect(out).not.toContain(poe1);
+    }
   }, 60000);
 });

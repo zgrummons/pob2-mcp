@@ -41,7 +41,7 @@ const GATING_TAGS = new Set([
   "herald", "aura", "curse", "mine", "trap", "strike",
 ]);
 
-function parseTags(tagString?: string): Set<string> {
+export function parseTags(tagString?: string): Set<string> {
   if (!tagString || typeof tagString !== "string") return new Set();
   return new Set(
     tagString.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
@@ -53,7 +53,7 @@ function parseTags(tagString?: string): Set<string> {
  * include the primary delivery tag like attack/spell that `tagString` omits)
  * unioned with the human-facing `tags` string. Used for gating membership tests.
  */
-function effectiveTagSet(gem: { tags?: string; tagKeys?: string[] }): Set<string> {
+export function effectiveTagSet(gem: { tags?: string; tagKeys?: string[] }): Set<string> {
   const s = new Set<string>();
   for (const t of gem.tagKeys || []) s.add(String(t).toLowerCase());
   for (const t of parseTags(gem.tags)) s.add(t);
@@ -61,7 +61,7 @@ function effectiveTagSet(gem: { tags?: string; tagKeys?: string[] }): Set<string
 }
 
 /** Human-facing descriptive tags (from tagString), excluding gating + 'support'. */
-function descriptiveTags(gem: { tags?: string }): string[] {
+export function descriptiveTags(gem: { tags?: string }): string[] {
   return [...parseTags(gem.tags)].filter((t) => !GATING_TAGS.has(t) && t !== "support");
 }
 
@@ -108,6 +108,65 @@ export function supportCompatibility(
     sharedDescriptiveTags: shared,
     matchedGating: [],
   };
+}
+
+export interface SupportSuggestion {
+  name: string;
+  tags: string;
+  reason: string;
+  shared: string[];
+}
+
+/**
+ * Rank compatible support gems from the engine gem DB against an arbitrary skill
+ * tag set (the skill need not be socketed in the build — used by the leveling
+ * planner, which may only have a skill *name*). Mismatched supports are dropped;
+ * the rest are ranked by shared descriptive + matched delivery tags.
+ */
+export async function rankSupportsForSkillTags(
+  engine: Pick<SkillEngine, "listGems">,
+  skillTags: Set<string>,
+  opts: { count?: number; exclude?: Set<string> } = {}
+): Promise<SupportSuggestion[]> {
+  const count = opts.count ?? 8;
+  const exclude = opts.exclude ?? new Set<string>();
+  const all = await engine.listGems({ type: "support", maxResults: 500, dedupeByName: true });
+  const ranked: Array<SupportSuggestion & { score: number }> = [];
+  for (const sg of all.gems) {
+    if (exclude.has(String(sg.name).toLowerCase())) continue;
+    const compat = supportCompatibility(skillTags, sg);
+    if (compat.compatibility === "mismatch") continue;
+    ranked.push({
+      name: sg.name,
+      tags: sg.tags || "",
+      reason: compat.compatibility === "universal" ? "applies broadly" : compat.reason,
+      shared: compat.sharedDescriptiveTags,
+      // Reward both shared damage-type tags and matched delivery tags so strong
+      // generic supports (e.g. extra-strike melee supports) aren't buried.
+      score: compat.sharedDescriptiveTags.length + compat.matchedGating.length,
+    });
+  }
+  ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return ranked.slice(0, count).map(({ score, ...rest }) => rest);
+}
+
+/**
+ * Resolve an active skill gem by name from the engine gem DB and return its
+ * effective tag set. Prefers an exact name match, then a prefix match, then the
+ * first result. Returns null if nothing resembles the name.
+ */
+export async function resolveActiveSkillTags(
+  engine: Pick<SkillEngine, "listGems">,
+  skillName: string
+): Promise<{ name: string; tags: Set<string>; tagString: string } | null> {
+  if (!skillName || !skillName.trim()) return null;
+  const res = await engine.listGems({ type: "active", search: skillName, dedupeByName: true, maxResults: 50 });
+  const lc = skillName.trim().toLowerCase();
+  const exact = res.gems.find((g) => String(g.name).toLowerCase() === lc);
+  const prefix = res.gems.find((g) => String(g.name).toLowerCase().startsWith(lc));
+  const match = exact || prefix || res.gems[0];
+  if (!match) return null;
+  return { name: match.name, tags: effectiveTagSet(match), tagString: match.tags || "" };
 }
 
 export interface AnalyzedGem {
@@ -224,28 +283,8 @@ export class Poe2SkillService {
     const skillTags = effectiveTagSet(activeGem);
     const used = new Set(gemList.filter((gm) => gm.isSupport).map((gm) => String(gm.name).toLowerCase()));
 
-    // Pull the full support list from the engine and rank.
-    const all = await engine.listGems({ type: "support", maxResults: 500, dedupeByName: true });
-    const ranked = [];
-    for (const sg of all.gems) {
-      if (used.has(String(sg.name).toLowerCase())) continue;
-      const compat = supportCompatibility(skillTags, sg);
-      if (compat.compatibility === "mismatch") continue;
-      ranked.push({
-        name: sg.name,
-        tags: sg.tags || "",
-        reason: compat.compatibility === "universal" ? "applies broadly" : compat.reason,
-        shared: compat.sharedDescriptiveTags,
-        // Reward both shared damage-type tags and matched delivery tags so strong
-        // generic supports (e.g. extra-strike melee supports) aren't buried.
-        score: compat.sharedDescriptiveTags.length + compat.matchedGating.length,
-      });
-    }
-    ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-    return {
-      activeSkill: activeGem.name,
-      suggestions: ranked.slice(0, count).map(({ score, ...rest }) => rest),
-    };
+    const suggestions = await rankSupportsForSkillTags(engine, skillTags, { count, exclude: used });
+    return { activeSkill: activeGem.name, suggestions };
   }
 
   /**
