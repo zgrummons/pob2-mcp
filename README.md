@@ -500,28 +500,19 @@ Issues and pull requests are welcome!
 
 ## Contributors
 
-<!-- readme: collaborators,contributors -start -->
 <table>
 	<tbody>
 		<tr>
             <td align="center">
-                <a href="https://github.com/ianderse">
-                    <img src="https://avatars.githubusercontent.com/u/5242189?v=4" width="100;" alt="ianderse"/>
+                <a href="https://github.com/zgrummons">
+                    <img src="https://avatars.githubusercontent.com/u/22529961?v=4" width="100;" alt="zgrummons"/>
                     <br />
-                    <sub><b>Ian</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/J-Gierend">
-                    <img src="https://avatars.githubusercontent.com/u/39157646?v=4" width="100;" alt="J-Gierend"/>
-                    <br />
-                    <sub><b>J-Gierend</b></sub>
+                    <sub><b>zgrummons</b></sub>
                 </a>
             </td>
 		</tr>
-	<tbody>
+	</tbody>
 </table>
-<!-- readme: collaborators,contributors -end -->
 
 ## License
 
