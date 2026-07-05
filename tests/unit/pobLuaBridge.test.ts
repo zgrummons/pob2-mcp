@@ -31,15 +31,16 @@ describe('PoBLuaApiClient', () => {
   });
 
   describe('Initialization', () => {
-    it('should spawn luajit process with correct arguments', async () => {
+    it('should spawn luajit with the vendored bootstrap entry and PoB src as cwd', async () => {
       await client.start();
 
       expect(mockSpawn).toHaveBeenCalledWith(
         'luajit',
-        ['HeadlessWrapper.lua'],
+        [expect.stringMatching(/pob-api[\\/]bootstrap\.lua$/)],
         expect.objectContaining({
           cwd: '/test/path',
-          env: expect.objectContaining({ POB_API_STDIO: '1' }),
+          // LUA_PATH must include the vendored pob-api dir so API.Handlers resolves.
+          env: expect.objectContaining({ LUA_PATH: expect.stringContaining('pob-api') }),
           stdio: ['pipe', 'pipe', 'pipe'],
         })
       );

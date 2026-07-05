@@ -14,7 +14,9 @@ This document outlines how we will integrate the forked Path of Building (PoB) h
   - Start: On first “lua_*” tool call (or explicit `lua_start`).
   - Stop: On MCP shutdown (or explicit `lua_stop`).
 - Node bridge (already added): `src/pobLuaBridge.ts`
-  - Spawns `luajit HeadlessWrapper.lua` in `~/Projects/PathOfBuilding/src` with `POB_API_STDIO=1`.
+  - Spawns `luajit <repo>/pob-api/bootstrap.lua` with the working directory set to PoB's `src/`
+    (`POB_FORK_PATH`). The vendored `bootstrap.lua` drives an unmodified PoB checkout; no
+    `POB_API_STDIO` / HeadlessWrapper patching required.
   - Methods: `start()`, `stop()`, `ping()`, `loadBuildXml()`, `getStats()`, `getTree()`, `setTree()`.
 - Fork API (implemented): `load_build_xml`, `get_stats`, `get_tree`, `set_tree`, `quit`.
 
@@ -196,7 +198,7 @@ Notes
      - `POB_LUA_ENABLED` (default: false)
      - `POB_FORK_PATH` (default: `~/Projects/PathOfBuilding/src`)
      - `POB_CMD` (default: `luajit`)
-     - `POB_ARGS` (default: `HeadlessWrapper.lua`)
+     - `POB_ARGS` (default: vendored `pob-api/bootstrap.lua` absolute path)
      - `POB_TIMEOUT_MS` (default: `10000`)
 
 5. Update docs
