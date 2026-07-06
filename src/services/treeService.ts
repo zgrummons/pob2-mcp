@@ -1,4 +1,5 @@
-import https from "https";
+import fs from "fs";
+import path from "path";
 import type {
   PassiveTreeNode,
   PassiveTreeData,
@@ -19,24 +20,25 @@ export class TreeService {
     this.buildService = buildService;
   }
 
-  async getTreeData(version: string = "3_26"): Promise<PassiveTreeData> {
-    // Check cache first
-    const cached = this.treeDataCache.get(version);
+  /**
+   * Load the PoE2 passive tree graph for the given version.
+   *
+   * Tree data is read from the local PathOfBuilding-PoE2 checkout
+   * (POB_FORK_PATH/TreeData/<version>/tree.json) so the pathing/optimization
+   * tools use the EXACT same tree the live engine does. If the requested
+   * version isn't present locally (e.g. 'Unknown', or a PoE1 version string
+   * from an older build), we fall back to the newest version in the checkout.
+   */
+  async getTreeData(version?: string): Promise<PassiveTreeData> {
+    const effective = this.resolveVersion(version);
+    const cached = this.treeDataCache.get(effective);
     if (cached) {
-      console.error(`[Tree Cache] Hit for version ${version}`);
+      console.error(`[Tree Cache] Hit for version ${effective}`);
       return cached.data;
     }
-
-    // Cache miss - fetch from source
-    console.error(`[Tree Cache] Miss for version ${version}`);
-    const treeData = await this.fetchTreeDataFromRepo(version);
-
-    // Store in cache
-    this.treeDataCache.set(version, {
-      data: treeData,
-      timestamp: Date.now(),
-    });
-
+    console.error(`[Tree Cache] Miss for version ${effective}`);
+    const treeData = this.loadTreeDataFromLocal(effective);
+    this.treeDataCache.set(effective, { data: treeData, timestamp: Date.now() });
     return treeData;
   }
 
@@ -50,161 +52,101 @@ export class TreeService {
     }
   }
 
-  async fetchTreeDataFromRepo(version: string = "3_26"): Promise<PassiveTreeData> {
-    console.error(`[Tree Data] Fetching tree data for version ${version}...`);
-
-    const url = `https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding/master/src/TreeData/${version}/tree.lua`;
-
-    return new Promise((resolve, reject) => {
-      https.get(url, (response) => {
-        if (response.statusCode === 404) {
-          // Version not found, try fallback to 3_26
-          console.error(`[Tree Data] Version ${version} not found, falling back to 3_26`);
-          if (version !== "3_26") {
-            this.fetchTreeDataFromRepo("3_26").then(resolve).catch(reject);
-            return;
-          }
-          reject(new Error(`Failed to fetch tree data: HTTP ${response.statusCode}`));
-          return;
-        }
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to fetch tree data: HTTP ${response.statusCode}`));
-          return;
-        }
-
-        let data = '';
-        response.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        response.on('end', () => {
-          try {
-            const treeData = this.parseTreeLua(data, version);
-            console.error(`[Tree Data] Successfully parsed ${treeData.nodes.size} nodes`);
-            resolve(treeData);
-          } catch (error) {
-            reject(new Error(`Failed to parse tree data: ${error}`));
-          }
-        });
-      }).on('error', (error) => {
-        reject(new Error(`Network error fetching tree data: ${error.message}`));
-      });
-    });
+  /** Directory holding per-version PoE2 tree data in the PoB checkout. */
+  private getForkTreeDataDir(): string {
+    return path.join(process.env.POB_FORK_PATH || "", "TreeData");
   }
 
-  private parseTreeLua(luaContent: string, version: string): PassiveTreeData {
+  private hasLocalVersion(version: string): boolean {
+    if (!version || !/^\d+_\d+$/.test(version)) return false;
+    return fs.existsSync(path.join(this.getForkTreeDataDir(), version, "tree.json"));
+  }
+
+  /** Newest PoE2 tree version present in the checkout (e.g. '0_5'). */
+  private resolveDefaultVersion(): string {
+    try {
+      const dir = this.getForkTreeDataDir();
+      const versions = fs
+        .readdirSync(dir)
+        .filter((v) => /^\d+_\d+$/.test(v) && fs.existsSync(path.join(dir, v, "tree.json")))
+        .sort((a, b) => {
+          const [am, an] = a.split("_").map(Number);
+          const [bm, bn] = b.split("_").map(Number);
+          return am - bm || an - bn;
+        });
+      if (versions.length) return versions[versions.length - 1];
+    } catch {
+      // fall through to default
+    }
+    return "0_5";
+  }
+
+  /** Use the requested version if present locally; otherwise the newest available. */
+  private resolveVersion(version?: string): string {
+    return version && this.hasLocalVersion(version) ? version : this.resolveDefaultVersion();
+  }
+
+  private loadTreeDataFromLocal(version: string): PassiveTreeData {
+    const file = path.join(this.getForkTreeDataDir(), version, "tree.json");
+    if (!fs.existsSync(file)) {
+      throw new Error(
+        `PoE2 passive tree data not found at ${file}. ` +
+          `Set POB_FORK_PATH to a PathOfBuilding-PoE2 'src' directory.`
+      );
+    }
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const treeData = this.buildTreeDataFromJson(raw, version);
+    console.error(
+      `[Tree Data] Loaded ${treeData.nodes.size} nodes for version ${version} from local checkout`
+    );
+    return treeData;
+  }
+
+  /**
+   * Convert a parsed PoE2 tree.json into our PassiveTreeData graph.
+   *
+   * PoE2 stores each edge on ONE endpoint only (node A lists B in
+   * `connections`, but B may not list A). Pathfinding needs an undirected
+   * graph, so we symmetrize: every connection A->B populates both A and B's
+   * adjacency (`out`, which the BFS treats as neighbors).
+   */
+  buildTreeDataFromJson(raw: any, version: string): PassiveTreeData {
     const nodes = new Map<string, PassiveTreeNode>();
+    const rawNodes = (raw && raw.nodes) || {};
 
-    // Extract nodes with brace counting for proper nesting
-    const nodeStartPattern = /\[(\d+)\]=\s*\{/g;
-
-    let match;
-    while ((match = nodeStartPattern.exec(luaContent)) !== null) {
-      const nodeId = match[1];
-      const startPos = match.index + match[0].length;
-
-      // Count braces to find the matching closing brace
-      let braceCount = 1;
-      let endPos = startPos;
-
-      while (braceCount > 0 && endPos < luaContent.length) {
-        if (luaContent[endPos] === '{') {
-          braceCount++;
-        } else if (luaContent[endPos] === '}') {
-          braceCount--;
-        }
-        endPos++;
-      }
-
-      if (braceCount === 0) {
-        const nodeContent = luaContent.substring(startPos, endPos - 1);
-
-        try {
-          const node = this.parseNodeContent(nodeId, nodeContent);
-          if (node) {
-            nodes.set(nodeId, node);
-          }
-        } catch (error) {
-          // Skip malformed nodes
-          continue;
-        }
-      }
+    for (const id of Object.keys(rawNodes)) {
+      const rn = rawNodes[id] || {};
+      const node: PassiveTreeNode = { skill: parseInt(id, 10) };
+      if (rn.name) node.name = rn.name;
+      if (rn.icon) node.icon = rn.icon;
+      if (Array.isArray(rn.stats) && rn.stats.length > 0) node.stats = rn.stats;
+      if (rn.isKeystone) node.isKeystone = true;
+      if (rn.isNotable) node.isNotable = true;
+      if (rn.isMastery) node.isMastery = true;
+      if (rn.isJewelSocket) node.isJewelSocket = true;
+      if (rn.isAscendancyStart) node.isAscendancyStart = true;
+      if (rn.ascendancyName) node.ascendancyName = rn.ascendancyName;
+      node.out = [];
+      node.in = [];
+      nodes.set(id, node);
     }
 
-    return {
-      nodes,
-      version,
+    const addEdge = (fromId: string, toId: string) => {
+      const from = nodes.get(fromId);
+      if (from && from.out && !from.out.includes(toId)) from.out.push(toId);
     };
-  }
-
-  private parseNodeContent(nodeId: string, content: string): PassiveTreeNode | null {
-    const node: PassiveTreeNode = {
-      skill: parseInt(nodeId),
-    };
-
-    // Extract name
-    const nameMatch = content.match(/\["name"\]=\s*"([^"]+)"/);
-    if (nameMatch) node.name = nameMatch[1];
-
-    // Extract icon
-    const iconMatch = content.match(/\["icon"\]=\s*"([^"]+)"/);
-    if (iconMatch) node.icon = iconMatch[1];
-
-    // Extract stats (can be multiple)
-    const stats: string[] = [];
-    const statsMatch = content.match(/\["stats"\]=\s*\{([^}]+)\}/);
-    if (statsMatch) {
-      const statsContent = statsMatch[1];
-      const statPattern = /"([^"]+)"/g;
-      let statMatch;
-      while ((statMatch = statPattern.exec(statsContent)) !== null) {
-        stats.push(statMatch[1]);
-      }
-    }
-    if (stats.length > 0) node.stats = stats;
-
-    // Extract boolean flags
-    if (content.includes('["isKeystone"]= true')) node.isKeystone = true;
-    if (content.includes('["isNotable"]= true')) node.isNotable = true;
-    if (content.includes('["isMastery"]= true')) node.isMastery = true;
-    if (content.includes('["isJewelSocket"]= true')) node.isJewelSocket = true;
-    if (content.includes('["isAscendancyStart"]= true')) node.isAscendancyStart = true;
-
-    // Extract ascendancy name if present
-    const ascendancyNameMatch = content.match(/\["ascendancyName"\]=\s*"([^"]+)"/);
-    if (ascendancyNameMatch) {
-      node.ascendancyName = ascendancyNameMatch[1];
-    }
-
-    // Extract connections (allowing for multiline and nested content)
-    const outMatch = content.match(/\["out"\]=\s*\{([^}]*)\}/);
-    if (outMatch) {
-      const outContent = outMatch[1];
-      // Match quoted numbers: "12345"
-      const matches = outContent.match(/"(\d+)"/g);
-      if (matches) {
-        node.out = matches.map(s => s.replace(/"/g, ''));
+    for (const id of Object.keys(rawNodes)) {
+      const conns = rawNodes[id] && rawNodes[id].connections;
+      if (!Array.isArray(conns)) continue;
+      for (const c of conns) {
+        const toId = String(c && typeof c === "object" && c.id != null ? c.id : c);
+        if (!nodes.has(toId)) continue;
+        addEdge(id, toId); // A -> B
+        addEdge(toId, id); // B -> A (symmetrize)
       }
     }
 
-    const inMatch = content.match(/\["in"\]=\s*\{([^}]*)\}/);
-    if (inMatch) {
-      const inContent = inMatch[1];
-      // Match quoted numbers: "12345"
-      const matches = inContent.match(/"(\d+)"/g);
-      if (matches) {
-        node.in = matches.map(s => s.replace(/"/g, ''));
-      }
-    }
-
-    // Debug: Log first few nodes with connections
-    if (node.out && node.out.length > 0) {
-      if (parseInt(nodeId) < 100) {
-        console.error(`[Parse Node] Node ${nodeId} has ${node.out.length} out connections: ${node.out.slice(0, 3).join(', ')}`);
-      }
-    }
-
-    return node;
+    return { nodes, version };
   }
 
   async mapNodesToDetails(

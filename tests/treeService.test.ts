@@ -352,6 +352,46 @@ describe('TreeService', () => {
     });
   });
 
+  describe('buildTreeDataFromJson (PoE2 tree.json)', () => {
+    it('symmetrizes one-directional connections so keystones are reachable', () => {
+      // Mirrors the real PoE2 data: node 31238 points to MoM (45918), but MoM
+      // itself lists no connections. The graph must still be traversable to it.
+      const raw = {
+        nodes: {
+          '31238': { name: 'Path node', connections: [{ id: 45918, orbit: 0 }] },
+          '45918': {
+            name: 'Mind Over Matter',
+            isKeystone: true,
+            stats: ['All Damage is taken from Mana before Life'],
+            connections: [],
+          },
+        },
+      };
+
+      const data = treeService.buildTreeDataFromJson(raw, '0_5');
+
+      expect(data.version).toBe('0_5');
+      expect(data.nodes.size).toBe(2);
+      const mom = data.nodes.get('45918')!;
+      expect(mom.name).toBe('Mind Over Matter');
+      expect(mom.isKeystone).toBe(true);
+      // Edge is stored only on 31238 in the raw data, but symmetrized both ways:
+      expect(data.nodes.get('31238')!.out).toContain('45918');
+      expect(mom.out).toContain('31238');
+    });
+
+    it('ignores connections that reference unknown nodes', () => {
+      const raw = { nodes: { '1': { name: 'A', connections: [{ id: 999 }] } } };
+      const data = treeService.buildTreeDataFromJson(raw, '0_5');
+      expect(data.nodes.get('1')!.out).toEqual([]);
+    });
+
+    it('handles missing/empty nodes object', () => {
+      const data = treeService.buildTreeDataFromJson({}, '0_5');
+      expect(data.nodes.size).toBe(0);
+    });
+  });
+
   describe('findShortestPaths', () => {
     it('should find shortest path between nodes', () => {
       const treeData: PassiveTreeData = {

@@ -1,6 +1,6 @@
 {
   "name": "pob2-mcp-server",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MCP server for Path of Building - PoE2 integration",
   "main": "build/index.js",
   "type": "module",
