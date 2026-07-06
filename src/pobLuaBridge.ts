@@ -1,47 +1,40 @@
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
-import { fileURLToPath } from "url";
 import fs from "fs";
 import path from "path";
 import os from "os";
 
 /**
- * Directory of the current module, working in both module systems: production
- * runs as ESM (`import.meta.url`), while ts-jest transpiles this file to
- * CommonJS (where `import.meta` is a syntax error but `__dirname` exists).
- * A direct `eval` sees module-scope `import.meta` under ESM and throws under
- * CommonJS, letting us pick the right source without a compile-time error.
- */
-function currentModuleDir(): string {
-  try {
-    const url = eval("import.meta.url") as string | undefined;
-    if (url) return path.dirname(fileURLToPath(url));
-  } catch {
-    // Not an ES module context (ts-jest / CommonJS).
-  }
-  if (typeof __dirname !== "undefined") return __dirname;
-  return process.cwd();
-}
-
-/**
  * Absolute path to the vendored Lua bridge (`pob-api/`) shipped inside this
- * package. `src/` and `build/` are both one level under the repo root, so
- * resolving `../pob-api` from this module's directory works for both the
- * compiled output and ts-jest/dev runs.
+ * package.
+ *
+ * This MUST NOT depend on `process.cwd()` as the primary anchor: the MCP server
+ * is launched by clients (e.g. Claude Desktop) with an arbitrary working
+ * directory — typically `C:\WINDOWS\system32` on Windows — so a cwd-relative
+ * guess resolves to a bogus path and luajit exits 1 ("cannot open ...").
+ *
+ * Instead we anchor on the entry script (`process.argv[1]`, e.g.
+ * `<pkg>/build/index.js`). `pobLuaBridge` and `index` both live in `build/`
+ * (or `src/` under ts-jest), so `../pob-api` from the entry dir is the package's
+ * `pob-api/`. cwd-based candidates remain only as later fallbacks for unusual
+ * launches. We verify each candidate actually contains `bootstrap.lua`.
  */
 function resolvePobApiDir(): string {
-  const moduleDir = currentModuleDir();
-  const candidates = [
-    path.join(moduleDir, "..", "pob-api"),
-    path.join(moduleDir, "pob-api"),
-    path.join(process.cwd(), "pob-api"),
-  ];
+  const candidates: string[] = [];
+  const entry = process.argv[1];
+  if (entry) {
+    const entryDir = path.dirname(entry);
+    candidates.push(path.join(entryDir, "..", "pob-api")); // build/index.js -> <pkg>/pob-api
+    candidates.push(path.join(entryDir, "pob-api"));
+  }
+  candidates.push(path.join(process.cwd(), "pob-api"));
+  candidates.push(path.join(process.cwd(), "..", "pob-api"));
+
   for (const c of candidates) {
     if (fs.existsSync(path.join(c, "bootstrap.lua"))) return c;
   }
-  // Fall back to the primary candidate even if not found, so error messages
-  // point at the expected location.
-  return candidates[0];
+  // Nothing found — return the best guess so the error names the expected path.
+  return candidates[0] ?? path.join(process.cwd(), "pob-api");
 }
 
 const POB_API_DIR = resolvePobApiDir();
