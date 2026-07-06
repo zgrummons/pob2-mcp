@@ -2,7 +2,7 @@
 
 An MCP (Model Context Protocol) server that enables Claude to analyze, modify, and optimize **Path of Exile 2** builds using Path of Building's actual calculation engine, via the [PathOfBuilding-PoE2](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2) fork.
 
-It is a port of [`pob-mcp`](../pob-mcp) (PoE1) to PoE2. The high-fidelity calculation half is driven by a headless `luajit` process running an `api-stdio` JSON bridge that was ported onto the PoE2 PoB codebase (`PathOfBuilding-PoE2/src/API/` + `HeadlessWrapper.lua` hooks).
+It is a port of [`pob-mcp`](../pob-mcp) (PoE1) to PoE2. The high-fidelity calculation half is driven by a headless `luajit` process running an `api-stdio` JSON bridge, vendored in this repo at `pob-api/` and run against an unmodified PathOfBuilding-PoE2 checkout.
 
 > ### ⚠️ MVP / port status
 >
@@ -169,19 +169,22 @@ sudo apt-get install luajit
 # Windows: download from https://luajit.org/ and add to PATH
 ```
 
-#### 2. Get the PoE2 PoB fork with the api-stdio bridge
-This repo's sibling `PathOfBuilding-PoE2/` already contains the ported api-stdio bridge
-(`src/API/{Server,Handlers,BuildOps}.lua`, `src/utf8.lua`, and the `POB_API_STDIO` hooks in
-`src/HeadlessWrapper.lua`). Point `POB_FORK_PATH` at its `src/` directory.
+#### 2. Get a PathOfBuilding-PoE2 checkout (no patching required)
+The api-stdio bridge is now **vendored inside this repo** at `pob-api/`
+(`pob-api/bootstrap.lua`, `pob-api/API/{Server,Handlers,BuildOps}.lua`, `pob-api/utf8.lua`). The
+server launches `luajit pob-api/bootstrap.lua` with the working directory set to PoB's `src/`, so
+it drives an **unmodified** PathOfBuilding-PoE2 checkout — you no longer patch `HeadlessWrapper.lua`
+or copy files into the PoB tree.
 
-If you are setting this up from a clean upstream clone instead, copy those `src/API/` files and
-`src/utf8.lua` over, and apply the `POB_API_STDIO` block from `src/HeadlessWrapper.lua` (which also
-redirects PoB logging to stderr so stdout stays pure JSON).
+Point `POB_FORK_PATH` at the `src/` directory of any compatible PathOfBuilding-PoE2 checkout (the
+sibling `PathOfBuilding-PoE2/` works, as does a clean upstream clone). "Compatible" means a version
+whose internals `pob-api/API/BuildOps.lua` expects; a wildly newer/older PoB may drift.
 
 #### 3. Verify
 ```bash
 luajit -v
-ls /path/to/PathOfBuilding/src/HeadlessWrapper.lua
+ls "$POB_FORK_PATH/Launch.lua"        # PoB src (must exist)
+ls pob-api/bootstrap.lua              # vendored bridge entry (must exist)
 ```
 
 #### 4. Update Claude Desktop config and restart Claude Desktop
@@ -449,15 +452,16 @@ sudo apt-get install luajit  # Ubuntu/Debian
 Or set `POB_CMD` to the full path (e.g., `/opt/homebrew/bin/luajit`).
 
 **`Failed to find valid ready banner`**
-`POB_FORK_PATH` must point to the directory containing `HeadlessWrapper.lua`:
+`POB_FORK_PATH` must point to a PathOfBuilding-PoE2 `src/` directory:
 ```bash
-ls "$POB_FORK_PATH/HeadlessWrapper.lua"   # must exist
-ls "$POB_FORK_PATH/Modules/"              # must exist
+ls "$POB_FORK_PATH/Launch.lua"   # must exist (PoB src)
+ls "$POB_FORK_PATH/Modules/"     # must exist
+ls pob-api/bootstrap.lua         # vendored bridge entry (must exist)
 ```
 
 **`Timed out waiting for response`**
 - Increase `POB_TIMEOUT_MS` (try `20000`)
-- Test manually: `cd "$POB_FORK_PATH" && luajit HeadlessWrapper.lua`
+- Test manually: `cd "$POB_FORK_PATH" && luajit /abs/path/to/pob-api/bootstrap.lua`
 
 **Stats don't match PoB GUI**
 - Check bandit/pantheon/enemy settings with `get_config`

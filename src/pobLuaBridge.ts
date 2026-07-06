@@ -1,7 +1,51 @@
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
+import { fileURLToPath } from "url";
+import fs from "fs";
 import path from "path";
 import os from "os";
+
+/**
+ * Directory of the current module, working in both module systems: production
+ * runs as ESM (`import.meta.url`), while ts-jest transpiles this file to
+ * CommonJS (where `import.meta` is a syntax error but `__dirname` exists).
+ * A direct `eval` sees module-scope `import.meta` under ESM and throws under
+ * CommonJS, letting us pick the right source without a compile-time error.
+ */
+function currentModuleDir(): string {
+  try {
+    const url = eval("import.meta.url") as string | undefined;
+    if (url) return path.dirname(fileURLToPath(url));
+  } catch {
+    // Not an ES module context (ts-jest / CommonJS).
+  }
+  if (typeof __dirname !== "undefined") return __dirname;
+  return process.cwd();
+}
+
+/**
+ * Absolute path to the vendored Lua bridge (`pob-api/`) shipped inside this
+ * package. `src/` and `build/` are both one level under the repo root, so
+ * resolving `../pob-api` from this module's directory works for both the
+ * compiled output and ts-jest/dev runs.
+ */
+function resolvePobApiDir(): string {
+  const moduleDir = currentModuleDir();
+  const candidates = [
+    path.join(moduleDir, "..", "pob-api"),
+    path.join(moduleDir, "pob-api"),
+    path.join(process.cwd(), "pob-api"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, "bootstrap.lua"))) return c;
+  }
+  // Fall back to the primary candidate even if not found, so error messages
+  // point at the expected location.
+  return candidates[0];
+}
+
+const POB_API_DIR = resolvePobApiDir();
+const POB_API_BOOTSTRAP = path.join(POB_API_DIR, "bootstrap.lua");
 
 /** Lua bridge request envelope */
 type LuaRequest = { action: string; params?: Record<string, unknown> };
@@ -11,7 +55,7 @@ type LuaResponse = { ok: boolean; error?: string; [key: string]: unknown };
 export interface PoBLuaApiOptions {
   cwd?: string;
   cmd?: string; // default: 'luajit'
-  args?: string[]; // default: ['HeadlessWrapper.lua']
+  args?: string[]; // default: [<pob-api>/bootstrap.lua]
   env?: Record<string, string>;
   timeoutMs?: number; // per-request timeout
 }
@@ -33,11 +77,16 @@ export class PoBLuaApiClient {
   constructor(options: PoBLuaApiOptions = {}) {
     // Prevent unhandled 'error' events (emitted on process exit) from crashing Node.js
     this.dataEmitter.on("error", () => {});
-    const forkSrc = options.cwd || path.join(os.homedir(), "Projects", "PathOfBuilding-PoE2", "src");
+    // cwd must be a PathOfBuilding-PoE2 `src/` directory. It no longer needs to
+    // be a patched fork: the vendored `pob-api/bootstrap.lua` drives a vanilla
+    // checkout (see resolvePobApiDir). POB_FORK_PATH may point at any compatible
+    // upstream checkout.
+    const pobSrc = options.cwd || path.join(os.homedir(), "Projects", "PathOfBuilding-PoE2", "src");
     this.options = {
-      cwd: forkSrc,
+      cwd: pobSrc,
       cmd: options.cmd || "luajit",
-      args: options.args || ["HeadlessWrapper.lua"],
+      // Entry is our vendored bootstrap (absolute path), NOT PoB's own wrapper.
+      args: options.args || [POB_API_BOOTSTRAP],
       env: options.env || {},
       timeoutMs: options.timeoutMs ?? 30000, // Increased from 10s to 30s
     };
@@ -64,11 +113,20 @@ export class PoBLuaApiClient {
     // On Windows, use semicolons and backslashes; on Unix, use colons and forward slashes
     const pathSep = isWindows ? ';' : ':';
 
+    // The vendored bridge lives outside the PoB tree; add it to LUA_PATH so
+    // `require('API.Handlers')` etc. resolve even if bootstrap.lua's own
+    // package.path setup is bypassed. bootstrap.lua also sets these at runtime.
+    const apiLuaPath = `${POB_API_DIR}${path.sep}?.lua${pathSep}${POB_API_DIR}${path.sep}?${path.sep}init.lua`;
+
     const env = {
       ...process.env,
       ...this.options.env,
-      POB_API_STDIO: "1",
-      LUA_PATH: `${runtimeLuaPath}${path.sep}?.lua${pathSep}${runtimeLuaPath}${path.sep}?${path.sep}init.lua${pathSep}${pathSep}`,
+      // NOTE: We deliberately do NOT set POB_API_STDIO. bootstrap.lua always
+      // starts the server itself, and omitting this flag means that even if
+      // POB_FORK_PATH points at a legacy patched fork, that fork's
+      // HeadlessWrapper will NOT auto-start its own (divergent) server —
+      // control returns to our bootstrap, which uses the vendored pob-api files.
+      LUA_PATH: `${apiLuaPath}${pathSep}${runtimeLuaPath}${path.sep}?.lua${pathSep}${runtimeLuaPath}${path.sep}?${path.sep}init.lua${pathSep}${pathSep}`,
       LUA_CPATH: `${runtimeDir}${path.sep}?.${luaExt}${pathSep}${luaRocksPath}${path.sep}?.${luaExt}${pathSep}${pathSep}`,
     } as NodeJS.ProcessEnv;
 
