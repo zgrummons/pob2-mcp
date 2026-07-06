@@ -4,21 +4,11 @@ An MCP (Model Context Protocol) server that enables Claude to analyze, modify, a
 
 It is a port of [`pob-mcp`](../pob-mcp) (PoE1) to PoE2. The high-fidelity calculation half is driven by a headless `luajit` process running an `api-stdio` JSON bridge, vendored in this repo at `pob-api/` and run against an unmodified PathOfBuilding-PoE2 checkout.
 
-> ### ⚠️ MVP / port status
->
-> The Lua bridge foundation is **ported and verified working** against the PoE2 engine (ping, new build, tree get/set, live stat calc incl. **Spirit**, item/skill/config ops, what-if calc). The TypeScript server is a copy of the PoE1 server with PoE2-aware bridge wiring.
->
-> **Validated for PoE2:** the `lua_*` engine tools (stats, tree, items, skills, config, level), and XML build analysis (PoE2 uses the same PoB XML schema).
->
-> **PoE2-native additions:** `list_gems` queries Path of Building's own PoE2 gem database (skill + support gems, tags, gem family, requirements, max level) — use it for accurate gem info instead of the legacy heuristics below.
->
-> **Engine-backed PoE2 tools to prefer:** `analyze_skills`, `suggest_supports` (incl. `measure_dps`), `list_gems`, `get_classes` — all sourced from the PoB2 engine. The defensive analyzer and `validate_build` have been retuned for PoE2 mechanics (evade/block/deflect, Spirit, charms; no spell suppression).
->
-> **poe.ninja** currency tools are ported to the PoE2 economy endpoint and on by default (`POE_NINJA_DISABLED=true` to hide).
->
-> **Disabled by default (PoE1-shaped, opt-in):** the legacy skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, `validate_gem_quality`, `compare_gem_setups`, `gem_upgrade_path`) — `POB_LEGACY_GEM_TOOLS=true`; Trade API — `POE_TRADE_ENABLED=true` (PoE2 trade2 endpoints; see below). Class/ascendancy ID tables in some descriptions and bandit/pantheon config (absent in PoE2) are PoE1 remnants.
->
-> **PoE2 engine differences already handled in the bridge:** `PassiveSpec:ImportFromNodeList` signature (extra `className` / `weaponSets` params), generic config passthrough (no bandit/pantheon), flask-slot validation against the actual item set, `Spirit` in default stat export, and stdout reserved for the JSON protocol (PoB logging redirected to stderr).
+### PoE2 specifics
+
+- **Engine-backed tools to prefer:** `analyze_skills`, `suggest_supports` (incl. `measure_dps`), `list_gems`, `get_classes` — all sourced from the PoB2 engine. `list_gems` queries Path of Building's own PoE2 gem database (skill + support gems, tags, gem family, requirements, max level). The defensive analyzer and `validate_build` are tuned for PoE2 mechanics (evade/block/deflect, Spirit, charms; no spell suppression).
+- **On by default:** poe.ninja currency tools on the PoE2 economy endpoint (`POE_NINJA_DISABLED=true` to hide).
+- **Opt-in:** legacy PoE1-shaped skill-gem tools (`analyze_skill_links`, `suggest_support_gems`, `find_optimal_links`, `validate_gem_quality`, `compare_gem_setups`, `gem_upgrade_path`) via `POB_LEGACY_GEM_TOOLS=true`; Trade API (PoE2 trade2 endpoints) via `POE_TRADE_ENABLED=true`.
 
 ---
 
